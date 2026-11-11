@@ -1,0 +1,577 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" id="themeColor" content="#0d1319">
+<title>Pengantar Game AI | Desain Game · Informatika UKDW</title>
+<script>
+const systemThemePreference=window.matchMedia('(prefers-color-scheme: light)');
+document.documentElement.setAttribute('data-theme',systemThemePreference.matches?'light':'dark');
+</script>
+<link rel="stylesheet" href="10_Game_AI_Interactive.css">
+<!-- Three.js is loaded from a CDN. The page has an interactive canvas fallback for offline access. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.148.0/three.min.js"></script>
+</head>
+<body>
+<div class="shell"><aside class="sidebar"><div class="brand"><div class="brandMark">AI</div><div><b>GAME AI INTERAKTIF</b><small>Desain Game · Informatika UKDW</small></div></div><div class="navTitle">Daftar isi · Materi</div><nav id="nav"></nav><div class="sideFoot">Unity 6 • C# • Web simulation<br>Perubahan terlihat secara langsung.</div></aside>
+<main class="main"><div class="topbar"><div class="crumb">DESAIN GAME / <span id="crumbNow">PENGANTAR GAME AI</span></div><div class="topActions"><label class="themeGroup" for="themeSelect">Tema <select id="themeSelect" aria-label="Pilih tema"><option value="light">Mode terang</option><option value="dark">Mode gelap</option></select></label><span class="offlineTag" id="modeLabel">Memeriksa mode grafis...</span><button class="topBtn" id="btnResetAll">Reset simulasi</button></div></div><div id="chapter"></div><div class="footerNav"><button id="prevBtn">← Materi sebelumnya</button><button id="nextBtn">Materi berikutnya →</button></div><div class="credit">Materi utama: 10_Game_AI_FSM.pptx dan 10_Game_AI_Unity_2D.docx · Ilustrasi pembelajaran berbasis SVG · Informatika UKDW. Rujukan ilmiah tambahan ditandai pada setiap bab. Simulasi browser menjalankan model JavaScript setara untuk demonstrasi, bukan mengeksekusi C# Unity secara langsung.</div></main></div>
+<div id="stagePool"><div id="stage" class="stage"><div class="stageLabels"><span class="hudChip stateChip" id="stateBadge">AI: Patrol</span><span class="hudChip" id="cellsBadge">Cells: 0/3</span><span class="hudChip" id="distanceBadge">Distance: —</span></div><div class="toast" id="stageToast">Klik arena untuk memindahkan Player. Gunakan tombol WASD / arah.</div></div></div>
+<script>
+'use strict';
+const LESSONS=[
+ {id:'overview',icon:'01',label:'Pengantar Game AI',title:'Pengantar Game AI: konsep dan penerapannya',sub:'Pelajari peran artificial intelligence dalam game, arsitektur NPC, dan bagaimana Finite State Machine menjadi salah satu contoh teknik pengambilan keputusan.',cards:[['SENSE','Perception','Sensor membaca posisi, jarak, dan world state.'],['DECIDE','Decision making','FSM, Behavior Tree, A*, atau aturan procedural.'],['ACT','Execution & feedback','NPC bergerak, menyerang, atau menghasilkan konten.']]},
+ {id:'fsm',icon:'02',label:'Finite State Machine',title:'Finite State Machine: Patrol, Chase, Attack',sub:'Pindahkan Player, ubah detectRange / attackRange, dan lihat transisi NPC pada arena 3D. Kode yang ditampilkan adalah C# Unity.',cards:[['STATE','Patrol','Guard bergerak antar waypoint ketika Player jauh.'],['TRANSITION','Chase','Guard mendekati Player ketika berada dalam detectRange.'],['ACTION','Attack','Guard berhenti dan mengirim attack log dengan cooldown.']]},
+ {id:'unity',icon:'03',label:'Praktik Unity 2D',title:'Praktik Unity 2D: Enemy Guard FSM',sub:'Hubungkan komponen pada scene Relay Collector yang sudah berfungsi. Latihan ini menambahkan AI ke functional prototype, bukan membuat game dari awal.',cards:[['SETUP','Scene & Rigidbody2D','Gravity Scale 0, Freeze Rotation Z, collider non-trigger.'],['REFERENCE','Inspector','Tetapkan Player, Patrol Points, dan AIStateText.'],['FEEDBACK','Game View','Lihat perubahan state dan Console saat guard merespons.']]},
+ {id:'bt',icon:'04',label:'Behavior Tree',title:'Behavior Tree: Selector dan prioritas',sub:'Bandingkan pengambilan keputusan berurutan: Attack → Chase → Patrol. Contoh ini adalah model konseptual, bukan engine Behavior Tree lengkap.',cards:[['SELECTOR','Pilih yang berhasil','Node diuji dari prioritas tertinggi.'],['SEQUENCE','Syarat dan aksi','Seluruh langkah harus berhasil.'],['FALLBACK','Patrol','Dijalankan jika Attack dan Chase gagal.']]},
+ {id:'astar',icon:'05',label:'A* Pathfinding',title:'A*: rute yang menghindari penghalang',sub:'Ubah obstacle pada grid, lalu telusuri pencarian A* langkah demi langkah menggunakan f(n) = g(n) + h(n).',cards:[['REPRESENTASI','Grid 4-arah','Setiap sel terbuka memiliki empat tetangga potensial.'],['HEURISTIC','Manhattan','h(n) = |dx| + |dy| untuk biaya gerak seragam.'],['HASIL','Jalur','Rute merupakan rangkaian node, bukan gerak lurus.']]},
+ {id:'procedural',icon:'06',label:'Procedural Generation',title:'Procedural Generation: seed dan validasi',sub:'Ubah seed, hasilkan energy cell baru, dan perhatikan aturan agar item tidak menabrak wall, Player, atau Goal.',cards:[['INPUT','Seed','Seed yang sama pada generator yang sama memberi hasil yang sama.'],['RULES','Constraints','Cek collider dan jarak antar item.'],['VALIDATE','Quality check','Periksa jumlah item dan keterjangkauan.']]},
+ {id:'testing',icon:'07',label:'Pengujian AI',title:'Pengujian AI: state, transisi, dan integrasi',sub:'Pelajari pengujian berbasis perilaku, boundary value, state coverage, dan transition coverage; kemudian bandingkan expected result dengan hasil sebenarnya.',cards:[['AI-01 → 05','State tests','Periksa Patrol, Chase, Attack, kembali Chase/Patrol.'],['AI-06','Collision','NPC dapat tersangkut ketika target berada di balik wall.'],['AI-07','Integration','Pengumpulan cell dan GoalZone harus tetap berjalan.']]},
+];
+const CS={
+ enemy:String.raw`using UnityEngine;
+using TMPro;
+
+[RequireComponent(typeof(Rigidbody2D))]
+public class EnemyFSM2D : MonoBehaviour
+{
+    enum State { Patrol, Chase, Attack }
+
+    [Header("References")]
+    [SerializeField] Transform player;
+    [SerializeField] Transform[] patrolPoints;
+    [SerializeField] TMP_Text stateText;
+
+    [Header("Behavior Parameters")]
+    [SerializeField] float speed = 2.5f;
+    [SerializeField] float detectRange = 4f;
+    [SerializeField] float attackRange = 0.8f;
+    [SerializeField] float waypointTolerance = 0.2f;
+    [SerializeField] float attackCooldown = 1.2f;
+
+    Rigidbody2D rb;
+    State state = State.Patrol;
+    int waypointIndex;
+    float nextAttackTime;
+
+    void Awake() => rb = GetComponent<Rigidbody2D>();
+    void Start() => SetState(State.Patrol);
+
+    void Update()
+    {
+        if (player == null) return;
+        float distance = Vector2.Distance(rb.position, player.position);
+        State next = distance <= attackRange ? State.Attack :
+            distance <= detectRange ? State.Chase : State.Patrol;
+        if (next != state) SetState(next);
+
+        if (state == State.Attack && Time.time >= nextAttackTime)
+        {
+            Debug.Log("Guard ATTACK (demo, belum ada damage)");
+            nextAttackTime = Time.time + attackCooldown;
+        }
+    }
+
+    void FixedUpdate()
+    {
+        if (player == null) return;
+        if (state == State.Attack)
+        {
+            rb.linearVelocity = Vector2.zero;
+            return;
+        }
+        Vector2 target;
+        if (state == State.Chase) target = player.position;
+        else
+        {
+            if (patrolPoints == null || patrolPoints.Length == 0) return;
+            target = patrolPoints[waypointIndex].position;
+            if (Vector2.Distance(rb.position, target) <= waypointTolerance)
+            {
+                waypointIndex = (waypointIndex + 1) % patrolPoints.Length;
+                target = patrolPoints[waypointIndex].position;
+            }
+        }
+        rb.MovePosition(Vector2.MoveTowards(
+            rb.position, target, speed * Time.fixedDeltaTime));
+    }
+
+    void SetState(State next)
+    {
+        state = next;
+        Debug.Log("Guard state -> " + state);
+        if (stateText != null) stateText.SetText("AI: " + state);
+    }
+
+    void OnDrawGizmosSelected()
+    {
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawWireSphere(transform.position, detectRange);
+        Gizmos.color = Color.red;
+        Gizmos.DrawWireSphere(transform.position, attackRange);
+    }
+}`,
+ sensor:String.raw`// Potongan dari EnemyFSM2D.cs
+[SerializeField] Transform player;
+[SerializeField] float detectRange = 4f;
+[SerializeField] float attackRange = 0.8f;
+
+void Update()
+{
+    if (player == null) return;
+
+    float distance = Vector2.Distance(
+        rb.position, player.position);
+
+    State next = distance <= attackRange
+        ? State.Attack
+        : distance <= detectRange
+            ? State.Chase : State.Patrol;
+
+    if (next != state) SetState(next);
+}`,
+ move:String.raw`// Potongan dari EnemyFSM2D.cs
+void FixedUpdate()
+{
+    if (player == null) return;
+    if (state == State.Attack)
+    {
+        rb.linearVelocity = Vector2.zero;
+        return;
+    }
+    Vector2 target;
+    if (state == State.Chase)
+        target = player.position;
+    else
+    {
+        if (patrolPoints.Length == 0) return;
+        target = patrolPoints[waypointIndex].position;
+        if (Vector2.Distance(rb.position, target)
+            <= waypointTolerance)
+        {
+            waypointIndex =
+                (waypointIndex + 1) % patrolPoints.Length;
+            target = patrolPoints[waypointIndex].position;
+        }
+    }
+    rb.MovePosition(Vector2.MoveTowards(
+        rb.position, target, speed * Time.fixedDeltaTime));
+}`,
+ state:String.raw`// Potongan dari EnemyFSM2D.cs
+void SetState(State next)
+{
+    state = next;
+    Debug.Log("Guard state -> " + state);
+    if (stateText != null)
+        stateText.SetText("AI: " + state);
+}
+
+void OnDrawGizmosSelected()
+{
+    Gizmos.color = Color.yellow;
+    Gizmos.DrawWireSphere(transform.position, detectRange);
+    Gizmos.color = Color.red;
+    Gizmos.DrawWireSphere(transform.position, attackRange);
+}`,
+ bt:String.raw`using UnityEngine;
+
+// Contoh pengayaan: logika keputusan setara dengan
+// Selector BT; bukan implementasi runtime BT penuh.
+public class GuardDecisionExample : MonoBehaviour
+{
+    [SerializeField] Transform player;
+    [SerializeField] float attackRange = 1.5f;
+    [SerializeField] float detectRange = 5f;
+
+    string EvaluateSelector()
+    {
+        if (player == null) return "Patrol";
+        float d = Vector2.Distance(
+            transform.position, player.position);
+
+        // SEQUENCE 1: syarat Attack, lalu aksi Attack
+        if (d <= attackRange) return "Attack";
+
+        // SEQUENCE 2: syarat Chase, lalu aksi Chase
+        if (d <= detectRange) return "Chase";
+
+        // Fallback jika semua kondisi gagal
+        return "Patrol";
+    }
+}`,
+ astar:String.raw`using System.Collections.Generic;
+using UnityEngine;
+
+// Pengayaan C# mandiri: data grid + pencarian A*.
+// Pemanggil masih perlu menggerakkan NPC
+// mengikuti List<Vector2Int> yang dihasilkan.
+public static class GridAStar2D
+{
+    static readonly Vector2Int[] Directions = {
+        Vector2Int.up, Vector2Int.right,
+        Vector2Int.down, Vector2Int.left
+    };
+
+    static int H(Vector2Int a, Vector2Int b) =>
+        Mathf.Abs(a.x - b.x) + Mathf.Abs(a.y - b.y);
+
+    public static List<Vector2Int> FindPath(
+        Vector2Int start, Vector2Int goal,
+        int width, int height,
+        HashSet<Vector2Int> blocked)
+    {
+        var open = new List<Vector2Int> { start };
+        var closed = new HashSet<Vector2Int>();
+        var parent = new Dictionary<Vector2Int, Vector2Int>();
+        var g = new Dictionary<Vector2Int, int> { [start] = 0 };
+        while (open.Count > 0)
+        {
+            Vector2Int cur = open[0];
+            foreach (var n in open)
+                if (g[n] + H(n, goal) < g[cur] + H(cur, goal))
+                    cur = n;
+            if (cur == goal)
+            {
+                var path = new List<Vector2Int> { cur };
+                while (parent.ContainsKey(cur))
+                {
+                    cur = parent[cur];
+                    path.Add(cur);
+                }
+                path.Reverse();
+                return path;
+            }
+            open.Remove(cur);
+            closed.Add(cur);
+            foreach (var dir in Directions)
+            {
+                var next = cur + dir;
+                if (next.x < 0 || next.y < 0 ||
+                    next.x >= width || next.y >= height ||
+                    blocked.Contains(next) || closed.Contains(next))
+                    continue;
+                int newG = g[cur] + 1;
+                if (!g.ContainsKey(next) || newG < g[next])
+                {
+                    g[next] = newG;
+                    parent[next] = cur;
+                    if (!open.Contains(next)) open.Add(next);
+                }
+            }
+        }
+        return new List<Vector2Int>(); // Tidak ada jalur
+    }
+}`,
+ procedural:String.raw`using System;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class CellSpawner2D : MonoBehaviour
+{
+    public GameObject cellPrefab;
+    public int seed = 1729;
+    public int count = 3;
+    public Vector2 min = new(-4f, -3f);
+    public Vector2 max = new(4f, 3f);
+    public LayerMask blockedMask;
+    public float clearance = 0.55f;
+
+    void Start()
+    {
+        if (cellPrefab == null)
+        {
+            Debug.LogError("Assign cellPrefab");
+            return;
+        }
+        var random = new System.Random(seed);
+        var positions = new List<Vector2>();
+        Physics2D.SyncTransforms();
+
+        int attempts = 0;
+        while (positions.Count < count && attempts < 150)
+        {
+            attempts++;
+            Vector2 point = new(
+                Mathf.Lerp(min.x, max.x, (float)random.NextDouble()),
+                Mathf.Lerp(min.y, max.y, (float)random.NextDouble()));
+            if (Physics2D.OverlapCircle(
+                point, clearance, blockedMask)) continue;
+            bool tooClose = positions.Exists(
+                p => Vector2.Distance(p, point) < clearance * 2f);
+            if (tooClose) continue;
+
+            positions.Add(point);
+            Instantiate(cellPrefab, point, Quaternion.identity);
+        }
+        if (positions.Count < count)
+            Debug.LogWarning(
+                $"Only spawned {positions.Count}/{count} cells");
+    }
+}`
+};
+const $=(sel,root=document)=>root.querySelector(sel);
+const $$=(sel,root=document)=>Array.from(root.querySelectorAll(sel));
+const escapeHTML=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+function highlight(code){
+ const keywords=new Set(['using','public','private','static','class','enum','void','if','else','return','new','while','foreach','for','continue','int','float','var','null','typeof','true','false','readonly']);
+ const types=new Set(['Rigidbody2D','MonoBehaviour','Transform','UnityEngine','Vector2','Vector2Int','Time','Gizmos','Color','Mathf','TMP_Text','List','HashSet','Dictionary','GameObject','LayerMask','Physics2D','System','Random','SerializeField','Header','RequireComponent','Debug','Quaternion']);
+ const re=/\/\/[^\n]*|"(?:\\.|[^"\\])*"|\b[A-Za-z_][A-Za-z_0-9]*\b|\b\d+(?:\.\d+)?f?\b/g;
+ let html='',pos=0,match;
+ while((match=re.exec(code))!==null){
+  html+=escapeHTML(code.slice(pos,match.index));
+  const token=match[0];
+  let tag=token.startsWith('//')?'cm':token.startsWith('"')?'st':keywords.has(token)?'kw':types.has(token)?'ty':/^\d/.test(token)?'num':null;
+  html+=tag?`<span class="${tag}">${escapeHTML(token)}</span>`:escapeHTML(token);
+  pos=re.lastIndex;
+ }
+ return html+escapeHTML(code.slice(pos));
+}
+let active=0,activeCode='enemy';
+let testStore={};
+const metaNotes={enemy:'Listing lengkap EnemyFSM2D.cs dari modul praktikum. Kode ditempel menjadi satu file C# di Assets/Scripts.',sensor:'Prioritas distance ≤ attackRange harus diperiksa sebelum distance ≤ detectRange.',move:'FixedUpdate menjalankan movement. Enemy berhenti ketika Attack.',state:'SetState mengirim log dan memperbarui TextMeshPro; Gizmos menunjukkan sensor.',bt:'Contoh C# tambahan untuk membaca urutan Selector; bukan Behavior Tree runtime penuh.',astar:'Contoh helper C# tambahan. Modul asli menyajikan A* sebagai pseudocode, bukan script Unity siap-pakai.',procedural:'Listing CellSpawner2D.cs dari modul. Validasi overlap tersedia; uji reachability masih perlu ditambahkan.'};
+function navRender(){const nav=$('#nav');nav.innerHTML=LESSONS.map((l,i)=>`<button class="navBtn ${i===active?'active':''}" data-i="${i}" title="${l.label}" aria-label="${l.label}"><span class="navIcon">${l.icon}</span><span class="label">${l.label}</span></button>`).join('');$$('.navBtn',nav).forEach(b=>b.addEventListener('click',()=>go(+b.dataset.i)))}
+function cardInfo(l){return `<div class="conceptRow">${l.cards.map(c=>`<div class="conceptCard"><div class="tag">${c[0]}</div><b>${c[1]}</b><p>${c[2]}</p></div>`).join('')}</div>`}
+function codeUI(key){let tabs=['enemy','sensor','move','state'];if(key==='bt'||key==='astar'||key==='procedural')tabs=[key];let label=key==='bt'?'GuardDecisionExample.cs':key==='astar'?'GridAStar2D.cs':key==='procedural'?'CellSpawner2D.cs':'EnemyFSM2D.cs';return `<section class="panel"><div class="panelHead"><div><b>Kode program Unity C#</b><span>${label} · baca atau salin ke Unity Editor</span></div><button class="smallBtn" id="copyCode">Salin C#</button></div><div class="codeWrap"><div class="codeTools">${tabs.map(t=>`<button class="tab ${t===activeCode?'active':''}" data-code="${t}">${{enemy:'File lengkap',sensor:'Sensor & transisi',move:'Movement',state:'Feedback',bt:'C# Selector',astar:'C# A*',procedural:'C# Spawner'}[t]}</button>`).join('')}</div><pre class="code" id="csharpCode"><code>${highlight(CS[activeCode])}</code></pre><div class="codeBottom" id="codeNote">${metaNotes[activeCode]}</div></div></section>`}
+function previewUI(kind){if(kind==='fsm')return `<section class="panel"><div class="panelHead"><div><b>Hasil langsung · arena Relay Collector</b><span>Three.js / Canvas fallback · perilaku sesuai konsep EnemyFSM2D.cs</span></div><span class="pill">LIVE SIMULATION</span></div><div class="previewPad"><div class="previewBox" id="stageHost"></div><div class="controlStrip"><button class="miniB" data-preset="patrol">01 Patrol</button><button class="miniB" data-preset="chase">02 Chase</button><button class="miniB" data-preset="attack">03 Attack</button><button class="miniB" id="runPause">⏸ Pause</button><button class="miniB" id="resetWorld">↺ Reset</button></div><div class="simDetails"><div class="stat"><small>Current state</small><strong id="simState">Patrol</strong></div><div class="stat"><small>Distance</small><strong id="simDistance">—</strong></div><div class="stat"><small>Attack log</small><strong id="simAttack">0</strong></div></div><label class="sliderLine">Detect Range <input id="detectSlider" type="range" min="2" max="5.5" step="0.1" value="4"><output id="detectOut">4.0</output></label><label class="sliderLine">Attack Range <input id="attackSlider" type="range" min="0.5" max="1.5" step="0.1" value="0.8"><output id="attackOut">0.8</output></label><label class="sliderLine">Speed <input id="speedSlider" type="range" min="0.6" max="4.5" step="0.1" value="2.5"><output id="speedOut">2.5</output></label><div class="note">Atur posisi Player dengan klik/drag pada arena atau tombol <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>. Untuk versi Unity, posisi Player berasal dari <code>Transform</code> dan gerak Guard memakai <code>Rigidbody2D.MovePosition</code>.</div><div id="eventLog" class="muted inline-style-02">Menunggu perubahan state...</div></div></section>`;
+if(kind==='bt')return `<section class="panel"><div class="panelHead"><div><b>Hasil langsung · visualisasi Behavior Tree</b><span>Selector memeriksa Attack, Chase, lalu Patrol</span></div><span class="pill">DECISION FLOW</span></div><div class="previewPad"><div class="btTree"><div class="btRoot">ROOT · SELECTOR</div><small>Evaluasi child dari kiri ke kanan</small><div class="btChildren"><div class="btChild" id="btAttack">ATTACK<span class="btCondition">distance ≤ 1.5</span></div><div class="btChild" id="btChase">CHASE<span class="btCondition">distance ≤ 5</span></div><div class="btChild" id="btPatrol">PATROL<span class="btCondition">Fallback</span></div></div></div><div class="btD"><span>Jarak Player</span><input id="btRange" type="range" min="0" max="9" step="0.1" value="3.2"><strong id="btDistance">3.2</strong></div><div class="btResult" id="btResult">CHASE terpilih</div><div class="controlStrip"><button class="miniB" data-bt="1">Jarak 1.0</button><button class="miniB" data-bt="3.2">Jarak 3.2</button><button class="miniB" data-bt="8">Jarak 8.0</button></div><div class="note">BT bukan sama dengan rangkaian <code>if/else</code>. Demo C# di kiri hanya menunjukkan keputusan yang setara dengan Selector; implementasi BT sebenarnya memerlukan node, status Success/Failure/Running, dan tick logic.</div></div></section>`;
+if(kind==='astar')return `<section class="panel"><div class="panelHead"><div><b>Hasil langsung · grid A*</b><span>Klik sel untuk memasang atau menghapus wall</span></div><span class="pill">PATHFINDING</span></div><div class="previewPad"><div class="gridBoard inline-style-03" id="astarBoard"></div><div class="legend"><span><i class="dot inline-style-04"></i>Start</span><span><i class="dot inline-style-05"></i>Goal</span><span><i class="dot inline-style-06"></i>Wall</span><span><i class="dot inline-style-07"></i>Open</span><span><i class="dot inline-style-08"></i>Path</span></div><div class="controlStrip"><button class="miniB" id="aStep">Langkah berikutnya</button><button class="miniB" id="aSolve">Cari rute</button><button class="miniB" id="aReset">Reset grid</button><button class="miniB" id="aBlock">Tutup koridor</button></div><div class="simDetails"><div class="stat"><small>Open list</small><strong id="aOpen">1</strong></div><div class="stat"><small>Closed list</small><strong id="aClosed">0</strong></div><div class="stat"><small>Path length</small><strong id="aLength">—</strong></div></div><div class="note" id="aMessage">A* mencari rute dengan biaya gerak 1 per sel dan heuristic Manhattan.</div></div></section>`;
+if(kind==='procedural')return `<section class="panel"><div class="panelHead"><div><b>Hasil langsung · generator energy cell</b><span>Dua konfigurasi seed, aturan spawn yang sama</span></div><span class="pill">SEEDED</span></div><div class="previewPad"><div class="seedLine"><span>Seed A</span><input type="number" id="seedInput" value="1729"><span>Seed B</span><input type="number" id="seedInputB" value="3141"></div><div class="controlStrip inline-style-09"><button class="miniB" id="genSeed">Generate</button><button class="miniB" id="sameSeed">Samakan seed</button><label class="inline-style-10"><input id="reachCheck" type="checkbox"> Periksa reachability (pengayaan)</label></div><div class="proceduralBoards"><div class="procBoard"><small id="procLabelA">SEED 1729</small><div class="procGrid" id="procA"></div><div class="procStatus" id="procStatusA"></div></div><div class="procBoard"><small id="procLabelB">SEED 3141</small><div class="procGrid" id="procB"></div><div class="procStatus" id="procStatusB"></div></div></div><div class="legend"><span><i class="dot inline-style-11"></i>Energy Cell</span><span><i class="dot inline-style-12"></i>Wall</span><span><i class="dot inline-style-13"></i>Player</span><span><i class="dot inline-style-14"></i>Goal</span></div><div class="note">Simulasi web memakai pseudo-random generator JavaScript yang deterministik. Urutan koordinat <strong>tidak dijamin identik</strong> dengan <code>System.Random</code> Unity walaupun seed sama. Kode C# modul memeriksa overlap dan jarak antar-item, tetapi belum memverifikasi keterjangkauan.</div></div></section>`;
+return ''}
+function introContent(){return `<div class="contentGrid"><article class="detailCard"><h3>Definisi Game AI</h3><p><strong>Game Artificial Intelligence (kecerdasan buatan dalam game)</strong> adalah pendekatan untuk menentukan keputusan, gerakan, strategi, atau konten yang dihasilkan oleh sistem permainan. Tujuannya bukan sekadar meniru kecerdasan manusia, melainkan menciptakan perilaku yang konsisten dengan aturan, tantangan, dan pengalaman pemain.</p><p>Dalam game, AI dapat bersifat <em>rule-based (berbasis aturan)</em>, pencarian jalur, perencanaan, atau pembelajaran. Algoritma eksplisit seperti FSM tidak membutuhkan model generatif untuk menghasilkan perilaku yang dapat diamati.</p></article><article class="detailCard"><h3>Komponen agen cerdas di dalam game</h3><div class="flowline"><span class="flowpill">PERCEPTION</span><span class="flowArrow">→</span><span class="flowpill">DECISION</span><span class="flowArrow">→</span><span class="flowpill">EXECUTION</span><span class="flowArrow">→</span><span class="flowpill">FEEDBACK</span></div><ol><li><strong>Perception:</strong> membaca jarak, posisi, suara, raycast, HP, dan world state.</li><li><strong>Decision:</strong> memilih aksi berdasarkan FSM, Behavior Tree, atau aturan lain.</li><li><strong>Execution:</strong> menerapkan gerakan, animasi, serangan, atau interaksi.</li><li><strong>Feedback:</strong> memperlihatkan hasil kepada pemain dan memberi data untuk observasi.</li></ol></article><article class="detailCard"><h3>Jenis masalah dan teknik yang sesuai</h3><table class="dataTable"><tr><th>Masalah dalam game</th><th>Teknik</th></tr><tr><td>NPC berganti perilaku sesuai jarak</td><td><strong>FSM</strong> / rule-based</td></tr><tr><td>NPC punya prioritas dan subperilaku</td><td><strong>Behavior Tree</strong></td></tr><tr><td>NPC harus bergerak menghindari tembok</td><td><strong>A* Pathfinding</strong></td></tr><tr><td>Posisi objek/level perlu bervariasi</td><td><strong>Procedural Generation</strong></td></tr></table><p>FSM dan BT terutama menangani keputusan, A* menangani pencarian jalur, sedangkan procedural generation membuat konten. Keduanya dapat digabung, tetapi tidak saling menggantikan.</p></article><article class="detailCard"><h3>FSM sebagai contoh awal Game AI</h3><p>Enemy Guard pada <em>Relay Collector</em> memiliki tiga state: <strong>Patrol</strong> ketika pemain jauh, <strong>Chase</strong> saat pemain terdeteksi, dan <strong>Attack</strong> ketika pemain sangat dekat.</p><p>Sensor jarak adalah input, kondisi ambang adalah aturan transisi, dan gerakan Guard adalah output. Kode C# dan simulasi di bawah memperlihatkan bagaimana satu keputusan sederhana dapat mengubah gameplay.</p><div class="note"><strong>Batas model:</strong> NPC mendeteksi berdasarkan jarak, bukan <em>line of sight</em>. Guard dapat tetap mengejar pemain yang berada di balik dinding. Perilaku tersebut menjadi kasus pengujian yang penting.</div></article><article class="detailCard wide"><h3>Alur eksplorasi materi</h3><p>Mulailah dengan FSM untuk memahami <em>state</em> dan <em>transition</em>. Bandingkan dengan BT untuk keputusan yang lebih modular. Setelah itu gunakan A* untuk memahami pencarian rute, procedural generation untuk variasi konten, dan pengujian AI untuk memverifikasi perilaku. Seluruh pembahasan mempertahankan <strong>kode C# Unity di kiri dan hasil visual di kanan</strong>.</p><button class="actionBtn primary" data-go="fsm">Jelajahi FSM →</button></article></div>`}
+function fsmContent(){return `<div class="contentGrid"><article class="detailCard"><h3>Model teori Finite State Machine</h3><p><strong>Finite State Machine (mesin keadaan hingga)</strong> memodelkan agen dengan sejumlah state yang terbatas. Secara formal, FSM dapat direpresentasikan sebagai <strong>M = (S, Σ, δ, s₀)</strong>, dengan S himpunan state, Σ himpunan input/peristiwa, δ fungsi transisi, dan s₀ state awal.</p><p>Pada game, input sering berupa kondisi sensor yang terus berubah. Dalam contoh ini, state aktif selalu satu pada satu waktu; setiap <code>Update()</code> mengevaluasi jarak dan menentukan state berikutnya.</p></article><article class="detailCard"><h3>Aturan transisi Enemy Guard</h3><table class="dataTable"><tr><th>Keadaan / kondisi</th><th>State berikut</th></tr><tr><td>Jarak ≤ 0,8 unit</td><td><strong>Attack:</strong> berhenti dan tampilkan log cooldown</td></tr><tr><td>0,8 &lt; jarak ≤ 4 unit</td><td><strong>Chase:</strong> mendekati pemain</td></tr><tr><td>Jarak &gt; 4 unit</td><td><strong>Patrol:</strong> bergerak ke waypoint</td></tr><tr><td>Titik patroli tercapai</td><td>Tetap Patrol, ganti waypoint</td></tr></table><p><strong>Prioritas transisi:</strong> periksa Attack lebih dahulu karena attackRange berada di dalam detectRange. Jika Chase diperiksa lebih dahulu tanpa kondisi tambahan, Attack dapat tertutup.</p></article><article class="detailCard"><h3>State, event, dan action</h3><ul><li><strong>State:</strong> Patrol, Chase, Attack.</li><li><strong>Transition condition:</strong> perbandingan <code>distance</code> dengan <code>attackRange</code> / <code>detectRange</code>.</li><li><strong>Action:</strong> <code>Rigidbody2D.MovePosition</code> saat Patrol/Chase; berhenti saat Attack.</li><li><strong>Feedback:</strong> <code>AIStateText</code> dan <code>Debug.Log</code> untuk state/peristiwa serangan.</li></ul></article><article class="detailCard"><h3>Kelebihan dan keterbatasan FSM</h3><p>FSM mudah diperiksa dan diuji untuk NPC dengan beberapa perilaku. Ketika jumlah state serta transisi meningkat, desain dapat menjadi sulit dipelihara, khususnya jika terdapat banyak kondisi silang.</p><p>Model ini tidak otomatis menyediakan <em>obstacle avoidance</em>, <em>line of sight</em>, atau sistem damage. Demo C# yang tersedia hanya menghasilkan serangan berbasis log, bukan mengurangi HP pemain.</p></article><article class="detailCard wide"><h3>Amati perubahan state</h3><p>Pilih preset <strong>Patrol</strong>, <strong>Chase</strong>, dan <strong>Attack</strong> pada simulator, lalu ubah <em>Detect Range</em>, <em>Attack Range</em>, dan <em>Speed</em>. Amati perubahan pada state, jarak, dan event log. Saat membuat scene Unity, pastikan Collider2D serta referensi Inspector sudah benar.</p></article></div>`}
+function unityContent(){return `<div class="contentGrid"><article class="detailCard"><h3>Setup Hierarchy</h3><pre class="inline-style-15">Prototype_02_AI
+├── Player [PlayerMove2D, PlayerCollect]
+├── EnemyGuard [Rigidbody2D, CircleCollider2D, EnemyFSM2D]
+├── PatrolPoint_A [Transform]
+├── PatrolPoint_B [Transform]
+├── EnergyCell_01..03
+├── Wall_01..04
+├── GoalZone
+├── GameManager [GameState]
+└── Canvas
+    ├── CellCounter
+    ├── AIStateText [TMP_Text]
+    └── WinPanel</pre></article><article class="detailCard"><h3>Inspector · konfigurasi awal</h3><table class="dataTable"><tr><th>Field / komponen</th><th>Nilai</th></tr><tr><td>Rigidbody2D</td><td>Dynamic, Gravity 0, Freeze Rotation Z</td></tr><tr><td>Player</td><td>Drag Transform Player</td></tr><tr><td>Patrol Points</td><td>Size 2, A lalu B</td></tr><tr><td>State Text</td><td>AIStateText (TextMeshPro)</td></tr><tr><td>Speed / Detect / Attack</td><td>2.5 / 4.0 / 0.8</td></tr><tr><td>Waypoint Tolerance / Cooldown</td><td>0.2 / 1.2</td></tr></table></article><article class="detailCard wide"><h3>Langkah praktik langsung</h3><div id="setupChecklist"></div><p class="muted inline-style-16">Tips: hidupkan tombol Gizmos untuk melihat lingkaran kuning Detect Range dan lingkaran merah Attack Range.</p></article></div>`}
+function btContent(){return `<div class="contentGrid"><article class="detailCard"><h3>Landasan teori Behavior Tree</h3><p><strong>Behavior Tree (pohon perilaku)</strong> merepresentasikan pengambilan keputusan agen sebagai node hierarkis. Berbeda dari FSM yang mengutamakan state aktif dan transisi, BT mengeksekusi pohon secara berkala melalui <em>tick</em>.</p><p>Setiap node umumnya mengembalikan <strong>Success</strong> (berhasil), <strong>Failure</strong> (gagal), atau <strong>Running</strong> (masih berjalan). Node kontrol memutuskan child berikutnya berdasarkan status tersebut.</p></article><article class="detailCard"><h3>Jenis node dan aturan evaluasi</h3><table class="dataTable"><tr><th>Node</th><th>Fungsi</th></tr><tr><td><strong>Selector (fallback)</strong></td><td>Mencoba child berurutan; berhenti ketika satu berhasil atau masih Running.</td></tr><tr><td><strong>Sequence</strong></td><td>Meminta seluruh child berhasil berurutan; berhenti jika ada Failure/Running.</td></tr><tr><td><strong>Condition</strong></td><td>Mengevaluasi syarat seperti <code>targetInRange</code>.</td></tr><tr><td><strong>Action</strong></td><td>Menjalankan gerak, serangan, investigasi, atau aksi lain.</td></tr></table></article><article class="detailCard"><h3>Contoh prioritas Enemy Guard</h3><div class="flowline"><span class="flowpill">ROOT: SELECTOR</span><span class="flowArrow">→</span><span class="flowpill">ATTACK?</span><span class="flowArrow">→</span><span class="flowpill">CHASE?</span><span class="flowArrow">→</span><span class="flowpill">PATROL</span></div><p>Selector mencoba <em>Sequence</em> untuk Attack (target dekat → serang). Jika gagal, selector mencoba Chase (target terdeteksi → kejar). Jika keduanya gagal, NPC menggunakan Patrol sebagai fallback.</p><p>Slider di simulator memakai <strong>attackRange 1,5</strong> dan <strong>detectRange 5</strong> sesuai ilustrasi Behavior Tree pada slide. Nilai tersebut sengaja berbeda dari demo FSM.</p></article><article class="detailCard"><h3>FSM dibanding Behavior Tree</h3><p>FSM lebih sederhana untuk 3 state dan cocok untuk baseline. BT memisahkan condition/action ke node modular sehingga perilaku <em>Investigate</em>, <em>Escape</em>, atau <em>Heal</em> lebih mudah disusun ulang dan digunakan kembali.</p><p><strong>Penting:</strong> kode C# di samping memperagakan hasil keputusan selector dengan <code>if/else</code>; itu bukan implementasi node BT lengkap yang memiliki status dan mekanisme tick. Visualisasi berfungsi untuk memahami prioritas pengambilan keputusan.</p></article></div>`}
+function astarContent(){return `<div class="contentGrid"><article class="detailCard"><h3>A* sebagai pencarian jalur berheuristik</h3><p><strong>A* (A-star)</strong> mencari lintasan dari start ke goal pada graph/grid menggunakan fungsi evaluasi <strong>f(n) = g(n) + h(n)</strong>. <strong>g(n)</strong> adalah biaya nyata dari start ke node n, sedangkan <strong>h(n)</strong> memperkirakan sisa biaya ke goal.</p><p>Algoritma memilih kandidat dengan f terkecil dari <em>open set</em> dan memperbarui biaya serta parent ketika rute yang lebih baik ditemukan. Node yang telah dievaluasi masuk ke <em>closed set</em>.</p></article><article class="detailCard"><h3>Heuristic Manhattan dan optimalitas</h3><p>Untuk grid empat arah dengan biaya langkah seragam, digunakan <strong>h(n) = |x<sub>goal</sub> − x<sub>n</sub>| + |y<sub>goal</sub> − y<sub>n</sub>|</strong>.</p><p>Heuristic tersebut tidak melebih-lebihkan biaya minimum pada grid 4-arah tanpa diagonal. Dengan biaya nonnegatif dan penanganan node yang benar, A* dapat mencari rute optimal. Jika ada variasi biaya atau diagonal, heuristic dan aturan perhitungan perlu disesuaikan.</p></article><article class="detailCard"><h3>Proses algoritma A*</h3><ol><li>Masukkan start ke open list dengan g = 0.</li><li>Pilih node dengan f terkecil.</li><li>Jika node adalah goal, telusuri <em>parent</em> untuk memperoleh rute.</li><li>Jika belum, evaluasi tetangga yang dapat dilalui dan perbarui g serta parent.</li><li>Ulangi sampai goal ditemukan atau open list kosong.</li></ol><p>Gunakan tombol <strong>Langkah berikutnya</strong> untuk mengamati open/closed list dan <strong>Cari rute</strong> untuk menyelesaikan perhitungan.</p></article><article class="detailCard"><h3>Perbedaan pathfinding dan movement</h3><p>FSM sebelumnya memakai <code>Vector2.MoveTowards</code> menuju posisi pemain. Aksi itu hanya gerak langsung, bukan penentuan rute. A* menghitung waypoint yang menghindari obstacle pada representasi lingkungan.</p><p>Hasil path harus diteruskan ke <em>movement follower</em> agar NPC benar-benar melewati node berurutan. Kode C# di sebelah kiri adalah helper pencarian path; pengguna masih perlu menghubungkannya dengan grid scene dan komponen penggerak.</p></article><article class="detailCard wide"><h3>Batas pendekatan dan skenario penting</h3><p>Jalur dapat berubah ketika obstacle dipindah atau target bergerak. Pada level dinamis, sistem perlu memutuskan kapan melakukan <em>replanning</em>. Uji tembok tunggal, koridor sempit, jalur alternatif, dan kondisi goal tidak terjangkau.</p></article></div>`}
+function procContent(){return `<div class="contentGrid"><article class="detailCard"><h3>Pengertian Procedural Content Generation</h3><p><strong>Procedural Content Generation (pembuatan konten prosedural)</strong> membuat elemen game secara otomatis atau dengan bantuan sistem menggunakan algoritma, parameter, dan aturan desain. Konten dapat berupa posisi item, peta, dungeon, objek, atau tantangan.</p><p>PCG bukan sekadar posisi acak: generator harus mempertimbangkan <em>constraints</em> agar hasil tetap dapat dimainkan. Pada studi kasus Relay Collector, tiga energy cell berubah lokasi tanpa mengubah aturan kemenangan.</p></article><article class="detailCard"><h3>Seed, determinisme, dan RNG</h3><p><strong>Seed</strong> menjadi titik awal <em>pseudo-random number generator (RNG)</em>. Dengan generator, parameter, dan urutan pemanggilan yang sama, seed yang sama menghasilkan urutan pseudo-acak yang sama. Hal ini membantu reproduksi bug dan perbandingan dua layout.</p><p>Seed 1729 dan 3141 pada visualisasi menghasilkan variasi yang berbeda. Perlu dicatat bahwa generator JavaScript di browser tidak identik dengan <code>System.Random</code> C# Unity, sehingga koordinat antarkedua lingkungan tidak harus sama.</p></article><article class="detailCard"><h3>Tahap generator yang terkendali</h3><ol><li>Tetapkan area, jumlah item, seed, dan jarak minimum antar-item.</li><li>Buat titik kandidat menggunakan RNG.</li><li>Tolak titik yang overlap dengan Wall, Player, atau Goal.</li><li>Tolak item yang terlalu dekat dengan item lain.</li><li>Periksa keterjangkauan menggunakan flood fill/pathfinding jika dibutuhkan.</li><li>Catat jumlah item berhasil serta upaya yang telah dilakukan.</li></ol></article><article class="detailCard"><h3>Validasi kualitas konten</h3><table class="dataTable"><tr><th>Kriteria</th><th>Contoh pemeriksaan</th></tr><tr><td><strong>Validity</strong></td><td>Item tidak berada di dalam obstacle.</td></tr><tr><td><strong>Reachability</strong></td><td>Player dapat mencapai item/goal melalui area yang dapat dilalui.</td></tr><tr><td><strong>Reproducibility</strong></td><td>Seed sama → layout sama pada generator yang sama.</td></tr><tr><td><strong>Variety</strong></td><td>Seed berbeda menghasilkan kemungkinan susunan berbeda.</td></tr></table><p>Spawner C# modul memeriksa overlap dan jarak, tetapi tidak secara otomatis menjamin reachability. Opsi reachability pada browser merupakan pengayaan konseptual.</p></article><article class="detailCard wide"><h3>Catatan implementasi di Unity</h3><p>Pasang <code>CellSpawner2D</code> dan tetapkan <code>cellPrefab</code>, area min/max, seed, count, serta <code>blockedMask</code>. Tempatkan Wall, Player, dan GoalZone pada layer yang diperiksa sebagai <em>SpawnBlocker</em>. Nonaktifkan EnergyCell manual agar tidak terjadi penggandaan jumlah item.</p></article></div>`}
+function testingContent(){return `<div class="contentGrid"><article class="detailCard"><h3>Prinsip pengujian Game AI</h3><p>Pengujian AI memeriksa apakah keputusan dan tindakan agen memenuhi aturan yang telah ditentukan pada berbagai kondisi permainan. Validasi tidak cukup dengan melihat NPC bergerak; setiap skenario harus memiliki <strong>input, expected result, actual result, dan status</strong>.</p><p>Pada FSM, pendekatan <em>model-based testing</em> menggunakan state chart dan transition table sebagai dasar perancangan skenario. Hasil pengujian membantu membedakan bug, keterbatasan algoritma, dan kebutuhan tuning gameplay.</p></article><article class="detailCard"><h3>Strategi dan cakupan pengujian</h3><table class="dataTable"><tr><th>Teknik</th><th>Contoh</th></tr><tr><td><strong>State coverage</strong></td><td>Pastikan Patrol, Chase, dan Attack masing-masing pernah aktif.</td></tr><tr><td><strong>Transition coverage</strong></td><td>Uji Patrol→Chase, Chase→Attack, Attack→Chase, Chase→Patrol.</td></tr><tr><td><strong>Boundary testing</strong></td><td>Bandingkan jarak sedikit di bawah, tepat pada, dan di atas 0,8 serta 4.</td></tr><tr><td><strong>Integration testing</strong></td><td>Pastikan pickup, HUD, collider, dan GoalZone tetap bekerja.</td></tr><tr><td><strong>Robustness</strong></td><td>Uji referensi null, obstacle, perubahan target mendadak, atau goal tak terjangkau.</td></tr></table></article><article class="detailCard wide"><h3>Test matrix · Enemy Guard</h3><div class="inline-style-17"><table class="dataTable tests" id="testTable"><thead><tr><th>ID</th><th>Skenario</th><th>Expected Result</th><th>Observasi</th><th>Actual Result</th><th>Hasil</th></tr></thead><tbody></tbody></table></div><div class="controlStrip"><button class="actionBtn" id="exportTests">Ekspor hasil uji (.csv)</button><button class="actionBtn" id="clearTests">Bersihkan hasil</button></div><div class="note">AI-01 sampai AI-05 dapat diamati melalui tombol preset pada arena. AI-06 dan AI-07 memerlukan pemeriksaan gerak dan core loop secara manual pada Unity Editor. Status Pass/Fail ditetapkan setelah membandingkan hasil aktual dengan expected result. Jangan menandai Pass hanya karena tombol preset berhasil diklik.</div></article><article class="detailCard"><h3>Troubleshooting</h3><ul><li><b>Guard diam:</b> periksa Player dan Patrol Points pada Inspector.</li><li><b>Chase sejak awal:</b> pindahkan Player lebih jauh dari detectRange.</li><li><b>Attack tidak aktif:</b> cek jarak pusat Collider dan attackRange.</li><li><b>Menembus Wall:</b> cek non-trigger Collider2D dan Rigidbody2D.</li><li><b>Tersangkut:</b> baseline Chase bergerak lurus, belum A*.</li></ul></article><article class="detailCard"><h3>Observabilitas dan bukti</h3><p>Catat nilai parameter, perubahan state, screenshot Game View, Inspector, Console log, dan perilaku terhadap Wall. Pisahkan hasil simulasi browser dari hasil build Unity yang sebenarnya. Untuk kasus AI-06, NPC tersangkut menggambarkan keterbatasan chase langsung, bukan bukti bahwa A* telah bekerja.</p></article></div>`}
+// Ilustrasi SVG orisinal dan bertahap untuk setiap bab.
+const ILLUSTRATIONS = {
+ overview: {
+  title: 'Ilustrasi 01 · Bagaimana NPC mengambil keputusan?',
+  intro: 'Amati hubungan antara informasi dari lingkungan, pemilihan perilaku, tindakan NPC, dan respons yang terlihat pemain.',
+  labels: ['01 · Sense','02 · Decide','03 · Act','04 · Feedback'],
+  details: [
+   'Sensor mengamati posisi dan jarak Player. NPC belum memutuskan tindakan sampai informasi tersedia.',
+   'Decision layer mengevaluasi aturan. FSM merupakan salah satu cara menentukan state yang aktif berdasarkan jarak.',
+   'Execution layer menjalankan tindakan. Pada contoh ini Enemy Guard bergerak menuju Player dengan MovePosition.',
+   'Pemain dapat melihat Guard mendekat dan HUD menampilkan state. Feedback membantu mengevaluasi perilaku AI.'
+  ]
+ },
+ fsm: {
+  title: 'Ilustrasi 02 · Peta transisi Finite State Machine',
+  intro: 'Satu state aktif pada satu waktu. Ubah kondisi jarak untuk melihat transisi Patrol, Chase, dan Attack.',
+  labels: ['PATROL · jauh','CHASE · terdeteksi','ATTACK · dekat'],
+  details: [
+   'Ketika jarak Player lebih dari 4 unit, Enemy Guard menjalankan patroli ke titik-titik waypoint.',
+   'Ketika jarak Player kurang dari atau sama dengan 4 unit tetapi lebih dari 0,8 unit, Guard beralih ke Chase.',
+   'Ketika jarak Player kurang dari atau sama dengan 0,8 unit, Guard berhenti dan menjalankan feedback serangan berdasarkan cooldown.'
+  ]
+ },
+ unity: {
+  title: 'Ilustrasi 03 · Hubungan Hierarchy, Inspector, dan Game View',
+  intro: 'Unity menggunakan komponen pada GameObject. Lihat bagian mana yang perlu dibuat, dikonfigurasi, dan dihubungkan.',
+  labels: ['01 · Hierarchy','02 · Physics 2D','03 · References'],
+  details: [
+   'Buat EnemyGuard dan dua PatrolPoint pada scene yang sudah berisi Player, Wall, EnergyCell, dan GoalZone.',
+   'Rigidbody2D menggunakan Gravity Scale = 0 dan Freeze Rotation Z. CircleCollider2D bukan trigger, agar collision dapat ditangani.',
+   'Pada script EnemyFSM2D, drag Player Transform, dua PatrolPoint, serta AIStateText ke field Inspector yang sesuai.'
+  ]
+ },
+ bt: {
+  title: 'Ilustrasi 04 · Selector memilih aksi berdasarkan prioritas',
+  intro: 'Bandingkan evaluasi setiap cabang Behavior Tree dengan tiga kondisi jarak pada ilustrasi.',
+  labels: ['1,0 · Attack','3,2 · Chase','8,0 · Patrol'],
+  details: [
+   'Selector memeriksa Attack Sequence lebih dahulu. Karena jarak 1,0 ≤ 1,5, cabang Attack berhasil dan cabang berikutnya tidak dievaluasi.',
+   'Attack gagal ketika target terlalu jauh. Cabang Chase berhasil karena jarak 3,2 ≤ 5, sehingga Patrol tidak dipakai.',
+   'Syarat Attack dan Chase sama-sama gagal pada jarak 8,0. Selector menjalankan Patrol sebagai fallback.'
+  ]
+ },
+ astar: {
+  title: 'Ilustrasi 05 · Tahapan pencarian jalur A*',
+  intro: 'Dari grid dengan obstacle, A* mengelola open/closed set dan menyusun rute yang tidak melewati dinding.',
+  labels: ['01 · Grid','02 · Open set','03 · Eksplorasi','04 · Path ditemukan'],
+  details: [
+   'Grid mengubah ruang permainan menjadi node walkable dan blocked. S menandai posisi awal dan G adalah tujuan.',
+   'Open set menyimpan node kandidat. Untuk setiap node, A* menghitung f(n) = g(n) + h(n).',
+   'Node dengan f terkecil dipilih untuk dievaluasi. Closed set berisi node yang telah diproses.',
+   'Setelah Goal ditemukan, parent node ditelusuri kembali untuk menghasilkan daftar waypoint yang dapat diikuti NPC.'
+  ]
+ },
+ procedural: {
+  title: 'Ilustrasi 06 · Dua seed, satu aturan generator',
+  intro: 'Perhatikan bahwa obstacle dan Goal tidak berubah, sementara posisi tiga energy cell dapat berbeda.',
+  labels: ['Seed 1729','Seed 3141','Periksa constraints'],
+  details: [
+   'Seed 1729 menghasilkan satu susunan item dari urutan pseudo-random yang ditentukan oleh generator.',
+   'Seed 3141 menghasilkan susunan berbeda. Menggunakan seed yang sama kembali memberikan hasil yang konsisten untuk implementasi yang sama.',
+   'Validasi menolak posisi di dalam wall, pada Player atau Goal, dan item yang terlalu dekat. Reachability memerlukan pemeriksaan tambahan.'
+  ]
+ },
+ testing: {
+  title: 'Ilustrasi 07 · Boundary testing untuk transisi FSM',
+  intro: 'Jarak yang tepat pada ambang batas perlu diuji. Aksi yang diamati harus dibandingkan dengan hasil yang diharapkan.',
+  labels: ['0,8 · Attack','2,5 · Chase','5,0 · Patrol','Wall · batas implementasi'],
+  details: [
+   'Pada distance = 0,8, kondisi distance ≤ attackRange terpenuhi sehingga expected state adalah Attack.',
+   'Pada distance = 2,5, posisi berada di antara attackRange dan detectRange sehingga expected state adalah Chase.',
+   'Pada distance = 5,0, Player berada di luar detectRange sehingga expected state adalah Patrol.',
+   'Jika Player berada di balik Wall, NPC dengan sensor jarak bisa tetap memilih Chase, tetapi tidak otomatis menemukan rute. Uji collider dan catat keterbatasannya.'
+  ]
+ }
+};
+const ID = (text, x,y, css='ivText', size=15, anchor='start') => `<text x="${x}" y="${y}" class="${css}" font-size="${size}" text-anchor="${anchor}" font-family="system-ui,-apple-system,Segoe UI,sans-serif">${text}</text>`;
+const IR = (x,y,w,h,css='ivCard',r=15,extra='') => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" class="${css}" ${extra}/>`;
+const IC = (x,y,r,css='ivAccent',extra='') => `<circle cx="${x}" cy="${y}" r="${r}" class="${css}" ${extra}/>`;
+const IL = (x1,y1,x2,y2,css='ivLine',extra='')=>`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" class="${css}" ${extra}/>`;
+function svgRoot(id,children){return `<svg class="illusSvg" viewBox="0 0 1040 376" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${escapeHTML(ILLUSTRATIONS[id].title)}"><title>${escapeHTML(ILLUSTRATIONS[id].title)}</title><defs><marker id="arr-${id}" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M1 1 L8 4.5 L1 8" class="ivArrowFill"/></marker><pattern id="grid-${id}" width="30" height="30" patternUnits="userSpaceOnUse"><path d="M30 0H0V30" class="ivGridStroke" fill="none"/></pattern></defs>${children}</svg>`}
+function gameHuman(x,y,color='ivBlue'){return `${IC(x,y,20,color)}${ID('P',x,y+6,'ivWhite ivBold',18,'middle')}`}
+function guard(x,y){return `${IR(x-20,y-20,40,40,'ivPurple',10)}${IC(x-7,y-3,3,'ivWhite')}${IC(x+7,y-3,3,'ivWhite')}${IL(x-9,y+9,x+9,y+9,'ivSmile')}${ID('E',x,y+36,'ivMuted',12,'middle')}`}
+function oveSvg(step){const blocks=[['SENSE','Jarak dan posisi'],['DECIDE','Pilih Patrol / Chase / Attack'],['ACT','Gerakkan Guard'],['FEEDBACK','HUD dan respons pemain']];let b=IR(15,27,415,320,'ivCard')+IR(35,53,375,265,'ivField',16)+IR(35,53,375,265,'ivGridPattern',16,`fill="url(#grid-overview)"`)+IR(185,115,24,105,'ivWall',4)+IR(259,232,94,15,'ivWall',4)+IC(308,151,99,'ivSensor',`stroke-dasharray="7 7"`)+gameHuman(94,242)+guard(307,151)+IL(116,230,280,164,'ivDotted')+ID('PLAYER',58,279,'ivMuted',14)+ID('SENSOR',245,53,'ivAmber ivBold',13)+ID('ARENA 2D',41,44,'ivMuted ivBold',12);
+ b+=IL(432,175,482,175,'ivConnector',`marker-end="url(#arr-overview)"`);
+ for(let i=0;i<4;i++){let y=40+i*79; b+=IR(492,y,518,66,i===step?'ivActiveCard':'ivCard',12)+IR(503,y+11,50,43,i===step?'ivAccent':'ivSoft',9)+ID(String(i+1).padStart(2,'0'),528,y+38,i===step?'ivWhite ivBold':'ivText ivBold',16,'middle')+ID(blocks[i][0],571,y+29,'ivText ivBold',16)+ID(blocks[i][1],571,y+49,'ivMuted',13);if(i<3)b+=IL(746,y+67,746,y+79,'ivConnector',`marker-end="url(#arr-overview)"`);}
+ b+=ID(step===0?'Perception membaca world state':step===1?'FSM memilih CHASE':step===2?'Guard bergerak ke Player':'Pemain menerima sinyal ancaman',203,335,'ivText ivBold',13,'middle');return svgRoot('overview',b)}
+function fsmSvg(step){let s=[{x:42,n:'PATROL',desc:'Jalan antar waypoint',fill:'ivTeal'},{x:392,n:'CHASE',desc:'Bergerak ke pemain',fill:'ivPurple'},{x:742,n:'ATTACK',desc:'Berhenti + serang',fill:'ivRose'}];let b=IR(18,28,1004,326,'ivCard');for(let i=0;i<3;i++){let q=s[i],active=i===step;b+=IR(q.x,87,260,127,active?'ivActiveCard':'ivSubcard',15)+IR(q.x+13,104,234,53,q.fill,10)+ID(q.n,q.x+130,139,'ivWhite ivBold',22,'middle')+ID(q.desc,q.x+130,184,'ivText',13,'middle')+ID(active?'STATE AKTIF':'STATE SIAGA',q.x+130,204,active?'ivAccentText':'ivMuted',11,'middle')}
+ b+=IL(304,130,386,130,'ivConnector',`marker-end="url(#arr-fsm)"`)+ID('d ≤ 4',347,116,'ivText ivBold',13,'middle')+IL(654,130,736,130,'ivConnector',`marker-end="url(#arr-fsm)"`)+ID('d ≤ 0,8',696,116,'ivText ivBold',13,'middle')+IL(736,200,658,200,'ivConnector',`marker-end="url(#arr-fsm)"`)+ID('d > 0,8',695,227,'ivMuted',12,'middle')+IL(386,200,306,200,'ivConnector',`marker-end="url(#arr-fsm)"`)+ID('d > 4',346,227,'ivMuted',12,'middle');
+ b+=ID('PRIORITAS KEPUTUSAN:',46,261,'ivMuted ivBold',13)+IR(45,277,952,45,'ivSubcard',12)+ID('if (distance ≤ attackRange)  ATTACK',65,305,step===2?'ivAccentText ivBold':'ivText',15)+ID('else if (distance ≤ detectRange)  CHASE',432,305,step===1?'ivAccentText ivBold':'ivText',14)+ID('else  PATROL',875,305,step===0?'ivAccentText ivBold':'ivText',14,'middle');return svgRoot('fsm',b)}
+function unitySvg(step){let b=IR(20,24,400,326,'ivCard')+IR(441,24,579,326,'ivCard')+IR(20,24,400,51,'ivSubcard',13)+IR(441,24,579,51,'ivSubcard',13)+ID('HIERARCHY / SCENE',42,57,'ivText ivBold',18)+ID('INSPECTOR · ENEMYGUARD',461,57,'ivText ivBold',18);
+ let tree=[['▾ Prototype_02_AI',0],['   • Player',1],['   ▾ EnemyGuard',1],['       SpriteRenderer',2],['       Rigidbody2D',2],['       CircleCollider2D',2],['       EnemyFSM2D',2],['   • PatrolPoint_A',1],['   • PatrolPoint_B',1],['   • GoalZone / EnergyCell',1]];tree.forEach((t,i)=>{let y=100+i*23;let target=(step===0 && [2,7,8].includes(i))||(step===1 && [4,5].includes(i))||(step===2 && i===6);if(target)b+=IR(40,y-16,356,22,'ivHighlight',5);b+=ID(t[0],45,y,target?'ivAccentText ivBold':'ivText',13)});
+ const fields=[['Rigidbody2D','Body Dynamic · Gravity 0 · Freeze Z'],['CircleCollider2D','Is Trigger = Off'],['EnemyFSM2D · Player','Player (Transform)'],['EnemyFSM2D · Patrol Points','A, B (Transform[2])'],['EnemyFSM2D · State Text','AIStateText (TMP_Text)']];fields.forEach((f,i)=>{let y=92+i*47,highlight=(step===1&&i<2)||(step===2&&i>=2);b+=IR(462,y,539,40,highlight?'ivActiveCard':'ivSubcard',9)+ID(f[0],476,y+18,'ivText ivBold',13)+ID(f[1],477,y+34,'ivMuted',11);});b+=ID(step===0?'01 · Siapkan GameObject pada Hierarchy':step===1?'02 · Atur physics agar NPC tidak jatuh':'03 · Assign semua field referensi lewat drag & drop',505,338,'ivAccentText ivBold',13);return svgRoot('unity',b)}
+function btSvg(step){let b=IR(20,23,1000,329,'ivCard')+IR(412,43,216,56,'ivPurple',14)+ID('ROOT SELECTOR',520,76,'ivWhite ivBold',19,'middle');const vals=[['ATTACK SEQUENCE','distance ≤ 1,5','Attack'],['CHASE SEQUENCE','distance ≤ 5','Chase'],['PATROL (fallback)','jika cabang gagal','Patrol']];let pos=[45,392,739];for(let i=0;i<3;i++){let x=pos[i],sel=i===step;b+=`<path d="M520 99 L${x+128} 142" class="${sel?'ivPathActive':'ivConnector'}" fill="none"/>`+IR(x,142,256,81,sel?'ivActiveCard':'ivSubcard',13)+ID(vals[i][0],x+128,172,'ivText ivBold',16,'middle')+ID(vals[i][1],x+128,197,'ivMuted',13,'middle')+IL(x+128,222,x+128,256,sel?'ivPathActive':'ivConnector',`marker-end="url(#arr-bt)"`)+IR(x+24,265,207,51,sel?'ivAccent':'ivSoft',12)+ID(vals[i][2],x+128,297,sel?'ivWhite ivBold':'ivText ivBold',18,'middle')+ID(sel?'SUCCESS':'SKIPPED / FAIL',x+128,340,sel?'ivAccentText ivBold':'ivMuted',12,'middle')};return svgRoot('bt',b)}
+function astarSvg(step){const W=11,H=8,C=36,x0=37,y0=40;let walls=new Set();for(let y=0;y<7;y++)if(y!==6)walls.add(y*W+4);for(let y=1;y<7;y++)if(y!==4)walls.add(y*W+7);const s=5*W+1,g=1*W+9;const queue=[s],prev={},seen=new Set([s]);let order=[];while(queue.length){let p=queue.shift();order.push(p);if(p===g)break;let x=p%W,y=Math.floor(p/W);for(let [dx,dy] of [[0,-1],[1,0],[0,1],[-1,0]]){let nx=x+dx,ny=y+dy,n=ny*W+nx;if(nx<0||ny<0||nx>=W||ny>=H||walls.has(n)||seen.has(n))continue;seen.add(n);prev[n]=p;queue.push(n)}}let route=[g],cur=g,cap=0;while(cur!==s&&prev[cur]!==undefined&&cap++<150){cur=prev[cur];route.push(cur)}route.reverse();const routeSet=new Set(route);let b=IR(20,20,445,337,'ivCard')+IR(489,20,529,337,'ivCard')+ID('GRID 4-ARAH',39,36,'ivMuted ivBold',13);
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++){let n=y*W+x,cls=walls.has(n)?'ivWall':step===3&&routeSet.has(n)?'ivPath':step===2&&order.slice(0,43).includes(n)?'ivClosed':step===1&&[s,s+1,s-W,s+W].includes(n)?'ivOpen':'ivSubcard';b+=IR(x0+x*C,y0+y*C,C-3,C-3,cls,5);if(n===s)b+=ID('S',x0+x*C+16,y0+y*C+21,'ivWhite ivBold',15,'middle');if(n===g)b+=ID('G',x0+x*C+16,y0+y*C+21,'ivWhite ivBold',15,'middle')};
+ const panels=[['f(n) = g(n) + h(n)','Skor yang dipakai dalam pencarian'],['OPEN SET','Node yang menunggu evaluasi'],['CLOSED SET','Node yang telah diproses'],['PATH / WAYPOINT','Urutan sel yang dapat dilalui']];panels.forEach((p,i)=>{let y=43+i*73,sel=i===step;b+=IR(508,y,488,62,sel?'ivActiveCard':'ivSubcard',11)+IR(522,y+11,42,41,sel?'ivAccent':'ivSoft',8)+ID(String(i+1),543,y+39,sel?'ivWhite ivBold':'ivText ivBold',17,'middle')+ID(p[0],579,y+26,'ivText ivBold',15)+ID(p[1],579,y+45,'ivMuted',12)});if(step===3)b+=ID(`Rute valid: ${route.length-1} langkah (ilustrasi)`,247,342,'ivAccentText ivBold',13,'middle');return svgRoot('astar',b)}
+function proceduralSvg(step){let walls=new Set([10,18,26,29,36,37]);const seedItems=[[6,15,35],[13,33,40]],W=8,H=6,c=41;let b=IR(20,20,1000,331,'ivCard');for(let j=0;j<2;j++){let x0=54+j*490,y0=70,selected=j===step; b+=IR(38+j*490,36,439,48,selected?'ivActiveCard':'ivSubcard',11)+ID(j===0?'SEED 1729':'SEED 3141',258+j*490,65,selected?'ivAccentText ivBold':'ivText ivBold',19,'middle');for(let y=0;y<H;y++)for(let x=0;x<W;x++){let n=y*W+x,cl=walls.has(n)?'ivWall':seedItems[j].includes(n)?'ivAmberFill':n===32?'ivTeal':n===47?'ivPurple':'ivSubcard';let xx=x0+x*c,yy=y0+y*c;b+=IR(xx,yy,c-4,c-4,cl,5);let label=seedItems[j].includes(n)?'E':n===32?'S':n===47?'G':'';if(label)b+=ID(label,xx+18,yy+23,'ivWhite ivBold',16,'middle')}}if(step===2){b+=IR(296,318,469,31,'ivActiveCard',7)+ID('✓ 3 item   ✓ No overlap   ✓ Wall tetap   ✓ Goal tetap',531,339,'ivAccentText ivBold',14,'middle')}else{b+=ID('S = Start    E = Energy Cell    G = Goal    ■ = Wall',520,342,'ivMuted',13,'middle')}return svgRoot('procedural',b)}
+function testingSvg(step){const d=[0.8,2.5,5,2.5][step],px=76+d/6*876;let b=IR(20,23,1000,329,'ivCard')+ID('DISTANCE PLAYER ↔ ENEMY (WORLD UNITS)',62,57,'ivMuted ivBold',17)+IR(76,108,127,60,'ivRose',7)+IR(204,108,468,60,'ivPurple',7)+IR(673,108,280,60,'ivTeal',7)+ID('ATTACK',140,144,'ivWhite ivBold',18,'middle')+ID('CHASE',437,144,'ivWhite ivBold',18,'middle')+ID('PATROL',813,144,'ivWhite ivBold',18,'middle');
+ for(let [x,l] of [[76,'0'],[203,'0,8'],[672,'4,0'],[954,'6,0']])b+=IL(x,177,x,188,'ivConnector')+ID(l,x,204,'ivMuted',14,'middle');b+=IL(px,81,px,104,'ivPathActive',`marker-end="url(#arr-testing)"`)+IR(Math.max(35,Math.min(902,px-33)),62,66,27,'ivActiveCard',9)+ID(step===3?'Wall':d.toFixed(1).replace('.',','),Math.max(68,Math.min(935,px)),81,'ivAccentText ivBold',14,'middle');
+ const state=step===0?'Attack':step===1?'Chase':step===2?'Patrol':'Chase (tanpa navigasi)', input=step===0?'distance = 0,8':step===1?'distance = 2,5':step===2?'distance = 5,0':'target di balik Wall';
+ for(let [i,title,val] of [[0,'INPUT',input],[1,'EXPECTED STATE',state],[2,'VALIDASI',step===3?'Cek collision dan stuck':'Expected vs Actual']]){let x=45+i*333;b+=IR(x,235,307,85,i===step%3?'ivActiveCard':'ivSubcard',12)+ID(title,x+18,263,'ivMuted ivBold',13)+ID(val,x+18,298,'ivText ivBold',step===3&&i===1?13:16)}return svgRoot('testing',b)}
+const ILLUSTRATION_RENDERERS={overview:oveSvg,fsm:fsmSvg,unity:unitySvg,bt:btSvg,astar:astarSvg,procedural:proceduralSvg,testing:testingSvg};
+function illustrationUI(id){let d=ILLUSTRATIONS[id];return `<section class="illustrationSection" id="illustration" data-illustration="${id}" aria-label="${escapeHTML(d.title)}"><div class="sectionLabel">Ilustrasi dan analisis visual</div><figure class="illusShell"><div class="illusHeader"><div><h3>${d.title}</h3><p>${d.intro}</p></div><span class="illusTag">ILUSTRASI INTERAKTIF</span></div><div class="illusScroller"><div class="illusViewport" id="illusViewport">${ILLUSTRATION_RENDERERS[id](0)}</div></div><div class="illusControls" role="group" aria-label="Pilih tahap ilustrasi">${d.labels.map((s,i)=>`<button type="button" class="illusStep ${i===0?'active':''}" data-illus-step="${i}" aria-pressed="${i===0?'true':'false'}">${s}</button>`).join('')}</div><figcaption class="illusCaption"><span class="illusCaptionIndex" id="illusStepIndex">01 / ${String(d.labels.length).padStart(2,'0')}</span><span id="illusCaptionText">${d.details[0]}</span></figcaption></figure></section>`}
+function bindIllustration(id){const root=$('#illustration'),d=ILLUSTRATIONS[id];if(!root)return;$$('[data-illus-step]',root).forEach(btn=>btn.addEventListener('click',()=>{const step=Number(btn.dataset.illusStep);$('#illusViewport').innerHTML=ILLUSTRATION_RENDERERS[id](step);$('#illusCaptionText').textContent=d.details[step];$('#illusStepIndex').textContent=String(step+1).padStart(2,'0')+' / '+String(d.labels.length).padStart(2,'0');$$('[data-illus-step]',root).forEach(b=>{const selected=Number(b.dataset.illusStep)===step;b.classList.toggle('active',selected);b.setAttribute('aria-pressed',String(selected))})}));}
+
+const REFERENCES={
+ overview:[
+  ['Millington, I. (2019). AI for Games, 3rd ed. CRC Press / Routledge.','https://www.routledge.com/AI-for-Games-Third-Edition/Millington/p/book/9781138483972','Ian Millington AI for Games Third Edition 2019'],
+  ['Praka, Y. S., dkk. (2026). Implementation of a Pathfinding-Based Intelligent Agent for Enemy Behavior in the “Run to BIPOL” Maze Tournament Game.','https://doi.org/10.21512/jggag.v11i2.16155','Implementation Pathfinding-Based Intelligent Agent Enemy Behavior Run to BIPOL 2026']
+ ],
+ fsm:[
+  ['Millington, I. (2019). AI for Games, Bab Decision Making. CRC Press.','https://www.routledge.com/AI-for-Games-Third-Edition/Millington/p/book/9781138483972','Ian Millington AI for Games finite state machines decision making'],
+  ['Finite State Machine and Behavior Tree Comparison for NPC AI in a 2D Browser Game (ICITCOM, 2026).','https://doi.org/10.1109/ICITCOM70739.2026.11714412','Finite State Machine Behavior Tree Comparison NPC AI 2D Browser Game 2026']
+ ],
+ unity:[
+  ['Unity Technologies. Unity 6 Scripting API: Rigidbody2D.MovePosition. Dokumentasi teknis, bukan artikel ilmiah.','https://docs.unity3d.com/6000.0/Documentation/ScriptReference/Rigidbody2D.MovePosition.html','Unity 6 Rigidbody2D MovePosition 2D game'],
+  ['Millington, I. (2019). AI for Games, 3rd ed. CRC Press.','https://www.routledge.com/AI-for-Games-Third-Edition/Millington/p/book/9781138483972','Ian Millington AI for Games Third Edition 2019']
+ ],
+ bt:[
+  ['Colledanchise, M., & Ögren, P. (2018). Behavior Trees in Robotics and AI: An Introduction. CRC Press.','https://arxiv.org/abs/1709.00084','Colledanchise Ogren Behavior Trees in Robotics and AI 2018'],
+  ['Finite State Machine and Behavior Tree Comparison for NPC AI in a 2D Browser Game (ICITCOM, 2026).','https://doi.org/10.1109/ICITCOM70739.2026.11714412','Finite State Machine Behavior Tree Comparison NPC AI 2D Browser Game 2026']
+ ],
+ astar:[
+  ['Hart, P. E., Nilsson, N. J., & Raphael, B. (1968). A Formal Basis for the Heuristic Determination of Minimum Cost Paths. IEEE TSSC, 4(2), 100–107.','https://doi.org/10.1109/TSSC.1968.300136','Hart Nilsson Raphael A Formal Basis for the Heuristic Determination of Minimum Cost Paths 1968'],
+  ['Millington, I. (2019). AI for Games, Bab Pathfinding. CRC Press.','https://www.routledge.com/AI-for-Games-Third-Edition/Millington/p/book/9781138483972','Ian Millington AI for Games Pathfinding 2019']
+ ],
+ procedural:[
+  ['Shaker, N., Togelius, J., & Nelson, M. J. (2016). Procedural Content Generation in Games. Springer.','https://doi.org/10.1007/978-3-319-42716-4','Shaker Togelius Nelson Procedural Content Generation in Games 2016'],
+  ['Togelius, J., Yannakakis, G. N., Stanley, K. O., & Browne, C. (2011). Search-Based Procedural Content Generation: A Taxonomy and Survey. IEEE TCIAIG, 3(3), 172–186.','https://doi.org/10.1109/TCIAIG.2011.2148116','Togelius Yannakakis Stanley Browne Search-Based Procedural Content Generation Taxonomy Survey 2011']
+ ],
+ testing:[
+  ['ISO/IEC/IEEE 29119-4:2021. Software and systems engineering — Software testing — Part 4: Test techniques. Standar teknis.','https://www.iso.org/standard/79430.html','ISO IEC IEEE 29119-4 2021 test techniques state transition'],
+  ['De Mesentier Silva, F., dkk. (2018). Exploring Gameplay With AI Agents. AIIDE 14(1), 159–165.','https://doi.org/10.1609/aiide.v14i1.13034','De Mesentier Silva Exploring Gameplay With AI Agents 2018'],
+  ['A Survey of AI-Driven Automated Game Testing Frameworks and Approaches (ICAC, 2026).','https://doi.org/10.1109/ICAC70325.2026.11712397','A Survey of AI-Driven Automated Game Testing Frameworks and Approaches 2026']
+ ]
+};
+function sourcesUI(id){let items=REFERENCES[id]||[];return `<section class="reading" aria-label="Referensi ilmiah"><div class="sectionLabel">Referensi akademik dan dokumentasi</div><div class="readHead"><h3>Rujukan untuk pendalaman</h3><p>Sumber utama berasal dari materi perkuliahan yang diberikan. Referensi di bawah merupakan tambahan literatur terverifikasi. Tombol <strong>Google Scholar</strong> membuka pencarian judul publikasi; tombol <strong>Sumber/DOI</strong> menuju laman penerbit atau sumber resmi.</p></div><div class="referenceGrid">${items.map((r,i)=>`<article class="refCard"><span class="refNumber">${String(i+1).padStart(2,'0')}</span><p>${escapeHTML(r[0])}</p><div class="refActions"><a target="_blank" rel="noopener noreferrer" href="https://scholar.google.com/scholar?q=${encodeURIComponent(r[2])}">↗ Google Scholar</a><a target="_blank" rel="noopener noreferrer" href="${r[1]}">↗ Sumber / DOI</a></div></article>`).join('')}</div></section>`}
+function workspaceAndContent(l){let id=l.id,kind=['overview','fsm','unity','testing'].includes(id)?'fsm':id;let codeKey=(id==='bt'?'bt':id==='astar'?'astar':id==='procedural'?'procedural':'enemy');activeCode=codeKey;let body={overview:introContent,fsm:fsmContent,unity:unityContent,bt:btContent,astar:astarContent,procedural:procContent,testing:testingContent}[id]();return `<div class="chapterHead"><div><div class="eyebrow">DESAIN GAME · INFORMATIKA UKDW</div><h1>${l.title}</h1><p class="lead">${l.sub}</p></div><div class="chapterNo">${l.icon} / ${String(LESSONS.length).padStart(2,'0')}</div></div>${cardInfo(l)}${illustrationUI(id)}<div class="sectionLabel">Materi & teori</div>${body}<div class="sectionLabel">Contoh kode C# Unity dan hasil simulasi berdampingan</div><div class="workspace">${codeUI(codeKey)}${previewUI(kind)}</div>${sourcesUI(id)}`}
+function go(n){const existingStage=document.getElementById('stage');if(existingStage&&existingStage.parentElement&&existingStage.parentElement.id==='stageHost')document.getElementById('stagePool').appendChild(existingStage);active=Math.max(0,Math.min(LESSONS.length-1,n));const l=LESSONS[active];$('#crumbNow').textContent='PENGANTAR GAME AI';$('#chapter').innerHTML=workspaceAndContent(l);navRender();$('#prevBtn').disabled=active===0;$('#nextBtn').disabled=active===LESSONS.length-1;attachCoreHandlers(l);document.querySelector('.main').scrollIntoView({behavior:'smooth',block:'start'});}
+function attachCoreHandlers(l){bindIllustration(l.id);$$('[data-code]').forEach(b=>b.addEventListener('click',()=>{activeCode=b.dataset.code;$$('[data-code]').forEach(x=>x.classList.toggle('active',x===b));$('#csharpCode code').innerHTML=highlight(CS[activeCode]);$('#codeNote').textContent=metaNotes[activeCode];$('#csharpCode').scrollTop=0}));$('#copyCode').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(CS[activeCode]);$('#copyCode').textContent='Tersalin ✓'}catch(e){let t=document.createElement('textarea');t.value=CS[activeCode];document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();$('#copyCode').textContent='Tersalin ✓'}setTimeout(()=>{if($('#copyCode'))$('#copyCode').textContent='Salin C#'},1400)});
+ let id=l.id;if(['overview','fsm','unity','testing'].includes(id)){const stage=$('#stage');$('#stageHost').appendChild(stage);initStage();if($('#detectSlider'))bindSimControls();}
+ if(id==='bt')bindBT();if(id==='astar')bindAStar();if(id==='procedural')bindProc();if(id==='unity')bindChecklist('setupChecklist',['Duplikat Prototype_01 menjadi Prototype_02_AI.unity.','Buat EnemyGuard serta Rigidbody2D dan CircleCollider2D.','Tambahkan PatrolPoint_A dan PatrolPoint_B.','Pasang script EnemyFSM2D.cs pada EnemyGuard.','Hubungkan Player, Patrol Points, dan AIStateText pada Inspector.','Tekan Play; uji Patrol, Chase, Attack, dan pengambilan 3 cell.']);if(id==='testing')bindTesting();$$('[data-go]').forEach(b=>b.addEventListener('click',()=>{let ix=LESSONS.findIndex(x=>x.id===b.dataset.go);if(ix>=0)go(ix)}));}
+function bindChecklist(id,arr){let box=$('#'+id);let key='gameai_'+id;let selected={};try{selected=JSON.parse(localStorage.getItem(key)||'{}')}catch{}box.innerHTML=arr.map((s,i)=>`<label class="checkItem"><input type="checkbox" data-idx="${i}" ${selected[i]?'checked':''}><span>${s}</span></label>`).join('');$$('input',box).forEach(input=>input.addEventListener('change',()=>{selected[input.dataset.idx]=input.checked;try{localStorage.setItem(key,JSON.stringify(selected))}catch{}}))}
+// ===== Three.js scene, using an equivalent JS FSM visual model =====
+const world={player:{x:-4.8,z:-2.8},enemy:{x:3.3,z:-2.1},waypoints:[{x:2.1,z:-2.1},{x:4.6,z:-2.1}],waypointIndex:0,detect:4,attack:.8,speed:2.5,state:'Patrol',attacks:0,nextAttack:0,paused:false,secs:0,blocked:false,cells:[{x:-4.5,z:2},{x:0,z:2.8},{x:4,z:.5}],picked:[],won:false,event:'Guard state → Patrol'};
+const walls=[{x:-.1,z:-.9,w:.55,d:2.4},{x:.85,z:1,w:2.25,d:.5},{x:-2.7,z:.25,w:.6,d:1.6}];
+let three=null,stageInit=false,dragging=false,keys={},lastFrame=performance.now(),fallbackCanvas=null,ctx=null;
+const dist=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z);
+function inWall(x,z,r=.24){return walls.some(w=>Math.abs(x-w.x)<w.w/2+r&&Math.abs(z-w.z)<w.d/2+r)}
+function safeSetPlayer(x,z){x=Math.min(5.7,Math.max(-5.7,x));z=Math.min(3.7,Math.max(-3.7,z));if(!inWall(x,z,.23)){world.player.x=x;world.player.z=z;}}
+function resetWorld(){world.player={x:-4.8,z:-2.8};world.enemy={x:3.3,z:-2.1};world.waypointIndex=0;world.state='Patrol';world.attacks=0;world.nextAttack=0;world.secs=0;world.picked=[];world.won=false;world.event='Guard state → Patrol';world.paused=false;updateStageText()}
+function preset(name){const e=world.enemy;let p;if(name==='attack')p={x:e.x+.4,z:e.z+.05};else if(name==='chase')p={x:e.x-1.5,z:e.z+.55};else p={x:-4.8,z:2.8};safeSetPlayer(p.x,p.z);fsmSense();updateStageText()}
+function fsmSense(){let d=dist(world.player,world.enemy),next=d<=world.attack?'Attack':d<=world.detect?'Chase':'Patrol';if(next!==world.state){world.state=next;world.event='Guard state → '+next;}return d}
+function stepWorld(dt){if(world.paused||world.won)return;world.secs+=dt;
+ let inputX=0,inputZ=0;if(keys.w||keys.arrowup)inputZ-=1;if(keys.s||keys.arrowdown)inputZ+=1;if(keys.a||keys.arrowleft)inputX-=1;if(keys.d||keys.arrowright)inputX+=1;if(inputX||inputZ){let len=Math.hypot(inputX,inputZ);safeSetPlayer(world.player.x+inputX/len*3.8*dt,world.player.z+inputZ/len*3.8*dt)}
+ fsmSense();if(world.state==='Attack'){if(world.secs>=world.nextAttack){world.attacks++;world.nextAttack=world.secs+1.2;world.event='Guard ATTACK (demo, belum ada damage)'}}else{let target=world.state==='Chase'?world.player:world.waypoints[world.waypointIndex];if(world.state==='Patrol'&&dist(world.enemy,target)<=.2){world.waypointIndex=(world.waypointIndex+1)%world.waypoints.length;target=world.waypoints[world.waypointIndex]}let d=dist(world.enemy,target);if(d>.001){let m=Math.min(d,world.speed*dt),nx=world.enemy.x+(target.x-world.enemy.x)/d*m,nz=world.enemy.z+(target.z-world.enemy.z)/d*m;if(!inWall(nx,nz,.27)){world.enemy.x=nx;world.enemy.z=nz}else if(world.state==='Chase')world.event='Guard terhalang Wall: movement langsung belum A*';}}
+ world.cells.forEach((c,i)=>{if(!world.picked.includes(i)&&dist(world.player,c)<.42){world.picked.push(i);world.event='Energy Cell collected: '+world.picked.length+'/3';}});if(world.picked.length===3&&dist(world.player,{x:5.1,z:2.75})<.65){world.won=true;world.event='GOAL! Core loop Relay Collector tetap berjalan';}}
+function updateStageText(){let d=dist(world.player,world.enemy);$('#stateBadge').textContent='AI: '+world.state;$('#cellsBadge').textContent=`Cells: ${world.picked.length}/3${world.won?' · GOAL!':''}`;$('#distanceBadge').textContent='Distance: '+d.toFixed(2);$('#stageToast').textContent=world.event;let st=$('#simState');if(st){st.textContent=world.state;st.dataset.state=world.state;$('#simDistance').textContent=d.toFixed(2);$('#simAttack').textContent=world.attacks;$('#eventLog').textContent='Console / HUD: '+world.event}let pa=$('#runPause');if(pa)pa.textContent=world.paused?'▶ Play':'⏸ Pause'}
+function ringMesh(radius,color){let mesh=new THREE.Mesh(new THREE.RingGeometry(Math.max(.01,radius-.045),radius+.045,96),new THREE.MeshBasicMaterial({color,side:THREE.DoubleSide,transparent:true,opacity:.8}));mesh.rotation.x=-Math.PI/2;mesh.position.y=.045;return mesh}
+function makeThree(){const stage=$('#stage');if(three)return;const scene=new THREE.Scene();scene.background=new THREE.Color(0x08182a);const camera=new THREE.OrthographicCamera(-7.1,7.1,4.65,-4.65,.1,100);camera.position.set(0,12,14.4);camera.lookAt(0,0,0);const renderer=new THREE.WebGLRenderer({antialias:true,alpha:false});renderer.setPixelRatio(Math.min(2,window.devicePixelRatio||1));renderer.setSize(Math.max(300,stage.clientWidth),stage.clientHeight,false);renderer.domElement.removeAttribute('style');renderer.outputEncoding=THREE.sRGBEncoding;stage.insertBefore(renderer.domElement,stage.firstChild);scene.add(new THREE.HemisphereLight(0x99ceff,0x172438,2.3));let dir=new THREE.DirectionalLight(0xffffff,2);dir.position.set(-2,9,4);scene.add(dir);
+ const floor=new THREE.Mesh(new THREE.PlaneGeometry(12,8),new THREE.MeshStandardMaterial({color:0x132941,roughness:1}));floor.rotation.x=-Math.PI/2;floor.position.y=-.065;scene.add(floor);let grid=new THREE.GridHelper(12,12,0x29435c,0x254059);grid.scale.z=8/12;grid.position.y=-.047;scene.add(grid);
+ function box(x,y,z,w,h,d,color,metalness=0){let mesh=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),new THREE.MeshStandardMaterial({color,roughness:.59,metalness}));mesh.position.set(x,y,z);scene.add(mesh);return mesh}
+ walls.forEach(w=>box(w.x,.46,w.z,w.w,.92,w.d,0x344b65));const goal=box(5.1,.1,2.75,.85,.2,.85,0x7b69ec);goal.material.emissive=new THREE.Color(0x292054);
+ const groupEnemy=new THREE.Group();box(0,0,0,0,0,0,0);let torso=new THREE.Mesh(new THREE.BoxGeometry(.57,.55,.5),new THREE.MeshStandardMaterial({color:0xef607c,metalness:.12,roughness:.4}));torso.position.y=.45;groupEnemy.add(torso);let face=new THREE.Mesh(new THREE.BoxGeometry(.45,.19,.08),new THREE.MeshStandardMaterial({color:0x20182e}));face.position.set(0,.48,.265);groupEnemy.add(face);for(let xx of [-.12,.12]){let eye=new THREE.Mesh(new THREE.BoxGeometry(.06,.07,.045),new THREE.MeshBasicMaterial({color:0xffdbf0}));eye.position.set(xx,.49,.315);groupEnemy.add(eye)}scene.add(groupEnemy);
+ const player=new THREE.Group();let body=new THREE.Mesh(new THREE.CylinderGeometry(.25,.28,.55,12),new THREE.MeshStandardMaterial({color:0x4f9bff,metalness:.12,roughness:.38}));body.position.y=.36;player.add(body);let head=new THREE.Mesh(new THREE.SphereGeometry(.18,14,10),new THREE.MeshStandardMaterial({color:0xe1eeff}));head.position.y=.72;player.add(head);scene.add(player);
+ const wp=world.waypoints.map(p=>{let m=new THREE.Mesh(new THREE.CylinderGeometry(.16,.16,.035,16),new THREE.MeshBasicMaterial({color:0x53d5cf}));m.position.set(p.x,.015,p.z);scene.add(m);return m});const coins=world.cells.map(c=>{let m=new THREE.Mesh(new THREE.TorusGeometry(.15,.065,7,18),new THREE.MeshStandardMaterial({color:0xffca5d,emissive:0x6c3d10}));m.position.set(c.x,.35,c.z);scene.add(m);return m});let detectRing=ringMesh(world.detect,0xedd36c),attackRing=ringMesh(world.attack,0xff4f77);scene.add(detectRing,attackRing);let raycaster=new THREE.Raycaster(),mouse=new THREE.Vector2(),plane=new THREE.Plane(new THREE.Vector3(0,1,0),0);
+ function pointerToWorld(evt){let r=renderer.domElement.getBoundingClientRect();mouse.x=((evt.clientX-r.left)/r.width)*2-1;mouse.y=-((evt.clientY-r.top)/r.height)*2+1;raycaster.setFromCamera(mouse,camera);let target=new THREE.Vector3();return raycaster.ray.intersectPlane(plane,target)?target:null}
+ renderer.domElement.addEventListener('pointerdown',evt=>{if(evt.button!==0)return;dragging=true;renderer.domElement.setPointerCapture(evt.pointerId);let p=pointerToWorld(evt);if(p)safeSetPlayer(p.x,p.z);});renderer.domElement.addEventListener('pointermove',evt=>{if(!dragging)return;let p=pointerToWorld(evt);if(p)safeSetPlayer(p.x,p.z)});renderer.domElement.addEventListener('pointerup',()=>dragging=false);renderer.domElement.addEventListener('pointercancel',()=>dragging=false);
+ three={scene,camera,renderer,player,groupEnemy,wp,coins,detectRing,attackRing,ringValues:[world.detect,world.attack]};resizeStage()}
+function resizeStage(){let stage=$('#stage');if(!stage||!three)return;let w=stage.clientWidth||550,h=stage.clientHeight||365;three.renderer.setSize(w,h,false);let aspect=w/h,halfH=5.7;three.camera.left=-halfH*aspect;three.camera.right=halfH*aspect;three.camera.top=halfH;three.camera.bottom=-halfH;three.camera.updateProjectionMatrix();}
+function canvasFallback(){if(fallbackCanvas)return;let stage=$('#stage');fallbackCanvas=document.createElement('canvas');stage.insertBefore(fallbackCanvas,stage.firstChild);ctx=fallbackCanvas.getContext('2d');fallbackCanvas.addEventListener('pointerdown',evt=>{dragging=true;fallbackCanvas.setPointerCapture(evt.pointerId);setCanvasPlayer(evt)});fallbackCanvas.addEventListener('pointermove',evt=>{if(dragging)setCanvasPlayer(evt)});fallbackCanvas.addEventListener('pointerup',()=>dragging=false);}
+function setCanvasPlayer(evt){let r=fallbackCanvas.getBoundingClientRect();safeSetPlayer((evt.clientX-r.left)/r.width*12-6,(evt.clientY-r.top)/r.height*8-4)}
+function fallbackDraw(){let c=fallbackCanvas;if(!c||!c.isConnected)return;let r=c.getBoundingClientRect();if(c.width!==Math.floor(r.width*devicePixelRatio)||c.height!==Math.floor(r.height*devicePixelRatio)){c.width=Math.floor(r.width*devicePixelRatio);c.height=Math.floor(r.height*devicePixelRatio)}let w=c.width,h=c.height;ctx.clearRect(0,0,w,h);ctx.fillStyle='#112b42';ctx.fillRect(0,0,w,h);let x=a=>(a+6)/12*w,z=a=>(a+4)/8*h,scale=w/12;ctx.strokeStyle='#23405d';for(let i=0;i<=12;i++){ctx.beginPath();ctx.moveTo(i*w/12,0);ctx.lineTo(i*w/12,h);ctx.stroke()}for(let i=0;i<=8;i++){ctx.beginPath();ctx.moveTo(0,i*h/8);ctx.lineTo(w,i*h/8);ctx.stroke()}
+ for(let [rad,color] of [[world.detect,'#e9d673'],[world.attack,'#fa708d']]){ctx.beginPath();ctx.arc(x(world.enemy.x),z(world.enemy.z),rad*scale,0,Math.PI*2);ctx.strokeStyle=color;ctx.lineWidth=2;ctx.stroke()}for(let wall of walls){ctx.fillStyle='#465f7f';ctx.fillRect(x(wall.x-wall.w/2),z(wall.z-wall.d/2),wall.w*scale,wall.d*h/8)}ctx.fillStyle='#8c72ec';ctx.fillRect(x(4.7),z(2.3),.8*scale,.8*h/8);world.waypoints.forEach(p=>{ctx.fillStyle='#5ed7ce';ctx.beginPath();ctx.arc(x(p.x),z(p.z),5,0,6.29);ctx.fill()});world.cells.forEach((p,i)=>{if(world.picked.includes(i))return;ctx.fillStyle='#ffd06a';ctx.beginPath();ctx.arc(x(p.x),z(p.z),8,0,6.29);ctx.fill()});for(let [obj,col,label] of [[world.player,'#439dff','P'],[world.enemy,'#ff7c9a','E']]){ctx.fillStyle=col;ctx.beginPath();ctx.arc(x(obj.x),z(obj.z),12,0,6.29);ctx.fill();ctx.fillStyle='white';ctx.font='bold 13px sans-serif';ctx.fillText(label,x(obj.x)-4,z(obj.z)+4)} }
+function initStage(){if(!stageInit){stageInit=true;try{if(typeof THREE==='undefined')throw Error('CDN offline');makeThree();$('#modeLabel').textContent='Mode 3D · Three.js'}catch(e){canvasFallback();$('#modeLabel').textContent='Mode offline · 2D fallback'}}else if(three)resizeStage();updateStageText()}
+function bindSimControls(){for(let b of $$('[data-preset]'))b.addEventListener('click',()=>preset(b.dataset.preset));$('#runPause').addEventListener('click',()=>{world.paused=!world.paused;updateStageText()});$('#resetWorld').addEventListener('click',()=>resetWorld());for(let [key,field] of [['detectSlider','detect'],['attackSlider','attack'],['speedSlider','speed']]){$('#'+key).value=world[field];$('#'+key.replace('Slider','Out')).textContent=world[field].toFixed(1);$('#'+key).addEventListener('input',evt=>{world[field]=+evt.target.value;if(world.attack>=world.detect){if(field==='attack')world.detect=world.attack+.1;else world.attack=Math.max(.4,world.detect-.1)}$('#detectSlider').value=world.detect;$('#attackSlider').value=world.attack;$('#detectOut').textContent=world.detect.toFixed(1);$('#attackOut').textContent=world.attack.toFixed(1);$('#speedOut').textContent=world.speed.toFixed(1);updateRings()})}}
+function updateRings(){if(!three)return;for(let [i,k,col] of [[0,'detect',0xedd36c],[1,'attack',0xff4f77]]){if(three.ringValues[i]===world[k])continue;let old=i?three.attackRing:three.detectRing;three.scene.remove(old);old.geometry.dispose();old.material.dispose();let nw=ringMesh(world[k],col);three.scene.add(nw);if(i)three.attackRing=nw;else three.detectRing=nw;three.ringValues[i]=world[k]}}
+let logTimer=0;function animate(now){requestAnimationFrame(animate);let dt=Math.min(.035,(now-lastFrame)/1000||0);lastFrame=now;if($('#stage').isConnected&&$('#stage').offsetParent!==null){stepWorld(dt);if(three){let {player,groupEnemy,coins,detectRing,attackRing,renderer,scene,camera}=three;player.position.set(world.player.x,0,world.player.z);groupEnemy.position.set(world.enemy.x,0,world.enemy.z);detectRing.position.x=attackRing.position.x=world.enemy.x;detectRing.position.z=attackRing.position.z=world.enemy.z;groupEnemy.children[0].material.color.setHex({Patrol:0x52bbd6,Chase:0xa28cff,Attack:0xef607c}[world.state]);coins.forEach((coin,i)=>{coin.visible=!world.picked.includes(i);coin.rotation.y+=dt*1.2});renderer.render(scene,camera)}else if(ctx)fallbackDraw();if(now-logTimer>130){logTimer=now;updateStageText()}}}
+requestAnimationFrame(animate);window.addEventListener('resize',resizeStage);window.addEventListener('keydown',e=>{if(/^(INPUT|TEXTAREA)$/.test(e.target.tagName))return;let k=e.key.toLowerCase();if(['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'].includes(k)){keys[k]=true;e.preventDefault()}});window.addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false});
+// ===== Behavior Tree =====
+function bindBT(){const update=()=>{let d=+$('#btRange').value;let result=d<=1.5?'Attack':d<=5?'Chase':'Patrol';$('#btDistance').textContent=d.toFixed(1);$('#btResult').textContent='SELECTOR memilih '+result.toUpperCase()+' · '+(result==='Attack'?'syarat Attack berhasil':result==='Chase'?'Attack gagal, Chase berhasil':'Attack dan Chase gagal');for(let st of ['Attack','Chase','Patrol'])$('#bt'+st).classList.toggle('on',st===result)};$('#btRange').addEventListener('input',update);$$('[data-bt]').forEach(b=>b.addEventListener('click',()=>{$('#btRange').value=b.dataset.bt;update()}));update()}
+// ===== A* 4-way incremental solver =====
+const AW=12,AH=8,aStart=5*AW+1,aGoal=1*AW+10;let aWalls=[],aState=null;
+function resetA(wallExtra=false){aWalls=new Set();for(let y=0;y<6;y++)aWalls.add(y*AW+4);for(let y=2;y<8;y++)aWalls.add(y*AW+7);for(let x=4;x<=8;x++)if(x!==6)aWalls.add(6*AW+x);aWalls.delete(aStart);aWalls.delete(aGoal);if(wallExtra){for(let x=0;x<AW;x++)aWalls.add(3*AW+x);aWalls.delete(aStart);aWalls.delete(aGoal)}startA()}
+function startA(){aState={open:new Set([aStart]),closed:new Set(),g:{[aStart]:0},parent:{},cur:null,path:[],done:false,result:null,steps:0};drawA()}
+function heuristic(n){return Math.abs(n%AW-aGoal%AW)+Math.abs(Math.floor(n/AW)-Math.floor(aGoal/AW))}
+function neighbors(n){let x=n%AW,y=Math.floor(n/AW),arr=[];if(y>0)arr.push(n-AW);if(x<AW-1)arr.push(n+1);if(y<AH-1)arr.push(n+AW);if(x>0)arr.push(n-1);return arr}
+function stepA(){let s=aState;if(s.done)return;if(s.open.size===0){s.done=true;s.result='no-path';drawA();return}let cur=Array.from(s.open).sort((a,b)=>s.g[a]+heuristic(a)-(s.g[b]+heuristic(b))||heuristic(a)-heuristic(b)||a-b)[0];s.cur=cur;if(cur===aGoal){s.done=true;s.result='found';let p=cur;s.path=[p];while(p!==aStart&&s.parent[p]!==undefined){p=s.parent[p];s.path.push(p)}s.path.reverse();drawA();return}s.open.delete(cur);s.closed.add(cur);for(let next of neighbors(cur)){if(aWalls.has(next)||s.closed.has(next))continue;let g=s.g[cur]+1;if(s.g[next]===undefined||g<s.g[next]){s.g[next]=g;s.parent[next]=cur;s.open.add(next)}}s.steps++;drawA()}
+function drawA(){let board=$('#astarBoard');if(!board)return;let s=aState;let html='';for(let y=0;y<AH;y++)for(let x=0;x<AW;x++){let n=y*AW+x;let klass='';if(aWalls.has(n))klass='wall';else if(s.path.includes(n))klass='path';else if(s.closed.has(n))klass='closed';else if(s.open.has(n))klass='open';if(n===aStart)klass='start';if(n===aGoal)klass='goal';if(n===s.cur)klass+=' current';let label=n===aStart?'S':n===aGoal?'G':'';html+=`<div role="button" tabindex="0" aria-label="Sel ${x}, ${y}" data-n="${n}" class="cell ${klass}">${label}${n===s.cur&&n!==aGoal&&n!==aStart?`<em>${s.g[n]}+${heuristic(n)}</em>`:''}</div>`}board.innerHTML=html;$$('.cell',board).forEach(el=>{const toggle=()=>{let n=+el.dataset.n;if(n===aStart||n===aGoal)return;if(aWalls.has(n))aWalls.delete(n);else aWalls.add(n);startA()};el.addEventListener('click',toggle);el.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();toggle()}})});$('#aOpen').textContent=s.open.size;$('#aClosed').textContent=s.closed.size;$('#aLength').textContent=s.result==='found'?s.path.length-1:'—';$('#aMessage').textContent=s.result==='found'?`Rute berhasil ditemukan: ${s.path.length-1} langkah. Sel biru menunjukkan path.`:s.result==='no-path'?'Tidak ada rute ke Goal. Periksa obstacle dan coba ubah grid.':`Langkah ${s.steps}. Open = ${s.open.size}, Closed = ${s.closed.size}. Klik “Langkah berikutnya” untuk mengevaluasi node ber-f terkecil.`}
+function bindAStar(){resetA();$('#aStep').addEventListener('click',stepA);$('#aSolve').addEventListener('click',()=>{let k=0;while(!aState.done&&k++<500)stepA()});$('#aReset').addEventListener('click',()=>resetA());$('#aBlock').addEventListener('click',()=>resetA(true))}
+// ===== Deterministic procedural preview =====
+const PW=9,PH=6,pStart=4*PW,pGoal=1*PW+8,pWall=new Set([1*PW+2,2*PW+2,3*PW+5,3*PW+6,3*PW+7,4*PW+4,4*PW+6,1*PW+6]);
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return ((t^t>>>14)>>>0)/4294967296}}
+function reachability(n){let seen=new Set([pStart]),queue=[pStart];while(queue.length){let cur=queue.shift(),x=cur%PW,y=Math.floor(cur/PW);for(let nb of [cur-1,cur+1,cur-PW,cur+PW]){if(nb<0||nb>=PW*PH||Math.abs(nb%PW-x)+Math.abs(Math.floor(nb/PW)-y)!==1||pWall.has(nb)||seen.has(nb))continue;seen.add(nb);queue.push(nb)}}return seen.has(n)}
+function procGenerate(seed,validateReach){let rng=mulberry32(seed|0),items=[],tries=0;while(items.length<3&&tries++<150){let n=Math.floor(rng()*PW*PH);if(n===pStart||n===pGoal||pWall.has(n)||items.some(p=>Math.abs(p%PW-n%PW)+Math.abs(Math.floor(p/PW)-Math.floor(n/PW))<2))continue;if(validateReach&&!reachability(n))continue;items.push(n)}return {items,tries}}
+function procDraw(id,seed,reach){let out=procGenerate(seed,reach),html='';for(let n=0;n<PW*PH;n++){let klass=pWall.has(n)?'wall':n===pStart?'start':n===pGoal?'goal':out.items.includes(n)?'item':'';let txt=n===pStart?'P':n===pGoal?'G':out.items.includes(n)?'⚡':'';html+=`<div class="procCell ${klass}">${txt}</div>`}$('#proc'+id).innerHTML=html;$('#procLabel'+id).textContent='SEED '+seed;$('#procStatus'+id).textContent=`${out.items.length}/3 cell · ${out.tries} percobaan · ${reach?'uji reachability aktif':'overlap + spacing'}`}
+function bindProc(){let run=()=>{let seed=Number($('#seedInput').value)||0,seedB=Number($('#seedInputB').value)||0,reach=$('#reachCheck').checked;procDraw('A',seed,reach);procDraw('B',seedB,reach)};$('#genSeed').addEventListener('click',run);$('#sameSeed').addEventListener('click',()=>{$('#seedInputB').value=$('#seedInput').value;run()});$('#reachCheck').addEventListener('change',run);run()}
+// ===== Testing =====
+const TESTS=[['AI-01','Player di luar Detect Range','Guard Patrol'],['AI-02','Player masuk Detect Range','Guard Chase'],['AI-03','Player masuk Attack Range','Guard Attack + cooldown log'],['AI-04','Player keluar dari Attack Range, masih dekat','Guard Chase kembali'],['AI-05','Player keluar dari Detect Range','Guard Patrol kembali'],['AI-06','Guard bertemu Wall','Collider menghalangi; dapat tersangkut'],['AI-07','Kumpulkan 3 cell dan masuk Goal','Core loop & WinPanel tetap bekerja']];
+function bindTesting(){
+ let saved={},actual={};
+ try{saved=JSON.parse(localStorage.getItem('gameai_tests')||'{}');actual=JSON.parse(localStorage.getItem('gameai_actual')||'{}')}catch(e){}
+ let tb=$('#testTable tbody');
+ tb.innerHTML=TESTS.map((x,i)=>`<tr><td>${x[0]}</td><td>${x[1]}</td><td>${x[2]}</td><td><button class="runTest" data-try="${i}">Tampilkan skenario</button></td><td><textarea class="actualInput" data-actual="${i}" aria-label="Actual result ${x[0]}" placeholder="Tulis hasil aktual"></textarea></td><td><select class="miniSelect" data-result="${i}" aria-label="Status uji ${x[0]}"><option value="Belum diuji">Belum diuji</option><option value="Pass">Pass</option><option value="Fail">Fail</option><option value="Perlu review">Perlu review</option></select></td></tr>`).join('');
+ $$('[data-actual]').forEach(el=>{el.value=actual[el.dataset.actual]||'';el.addEventListener('input',()=>{actual[el.dataset.actual]=el.value;try{localStorage.setItem('gameai_actual',JSON.stringify(actual))}catch(e){}})});
+ $$('[data-result]').forEach(el=>{el.value=saved[el.dataset.result]||'Belum diuji';el.addEventListener('change',()=>{saved[el.dataset.result]=el.value;try{localStorage.setItem('gameai_tests',JSON.stringify(saved))}catch(e){}})});
+ $$('[data-try]').forEach(b=>b.addEventListener('click',()=>{let n=+b.dataset.try;if(n===0)preset('patrol');if(n===1||n===3)preset('chase');if(n===2)preset('attack');if(n===4)preset('patrol');if(n===5){world.enemy={x:.8,z:-1.3};safeSetPlayer(-1.2,-1.3);world.event='Jalankan dan lihat Guard di depan Wall';}if(n===6){resetWorld();world.event='Gerakkan Player untuk mengumpulkan tiga cell, lalu ke Goal ungu';}updateStageText();$('#stage').scrollIntoView({behavior:'smooth',block:'center'})}));
+ $('#clearTests').addEventListener('click',()=>{saved={};actual={};$$('[data-result]').forEach(x=>x.value='Belum diuji');$$('[data-actual]').forEach(x=>x.value='');try{localStorage.removeItem('gameai_tests');localStorage.removeItem('gameai_actual')}catch(e){}});
+ $('#exportTests').addEventListener('click',()=>{let content='ID,Skenario,Expected Result,Actual Result,Hasil\r\n'+TESTS.map((r,i)=>[...r,actual[i]||'',saved[i]||'Belum diuji'].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\r\n');downloadText('GameAI_Test_Matrix.csv','\ufeff'+content,'text/csv;charset=utf-8')});
+}
+function downloadText(name,content,mime){let a=document.createElement('a'),url=URL.createObjectURL(new Blob([content],{type:mime}));a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)}
+function applyTheme(theme){const t=theme==='dark'?'dark':'light';document.documentElement.setAttribute('data-theme',t);$('#themeSelect').value=t;$('#themeColor').setAttribute('content',t==='dark'?'#0d1319':'#f3f5f9')}
+let lastSystemTheme=systemThemePreference.matches?'light':'dark';
+function syncSystemTheme(isLight){const theme=isLight?'light':'dark';if(theme===lastSystemTheme)return;lastSystemTheme=theme;applyTheme(theme)}
+$('#themeSelect').addEventListener('change',e=>applyTheme(e.target.value));systemThemePreference.addEventListener('change',e=>syncSystemTheme(e.matches));document.addEventListener('visibilitychange',()=>{if(!document.hidden)syncSystemTheme(systemThemePreference.matches)});applyTheme(document.documentElement.getAttribute('data-theme'));
+$('#prevBtn').addEventListener('click' ,()=>go(active-1));$('#nextBtn').addEventListener('click',()=>go(active+1));$('#btnResetAll').addEventListener('click',resetWorld);go(0);
+</script>
+</body></html>
